@@ -1,0 +1,584 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import Toast from '../components/Toast'
+import Modal from '../components/Modal'
+import { api, login, getToken, setToken, clearToken } from '../api'
+
+interface Subject { id: string; name: string; description?: string; color?: string; location?: string; customFields?: string[]; active?: boolean }
+interface Slot { id: string; subjectId: string; subjectName: string; startTime: string; duration: number; maxCapacity: number; currentBookings: number }
+interface Booking { id: string; studentName: string; studentId: string; studentEmail: string; subjectName: string; slotStart: string | null; slotDuration: number; createdAt: string | null; status: string; answers?: any }
+interface User { id: string; name: string; username: string; email?: string; role: string }
+
+type Tab = 'dashboard' | 'bookings' | 'subjects' | 'slots' | 'users' | 'settings'
+
+export default function Staff() {
+  const [isLoggedIn, setIsLoggedIn] = useState(!!getToken())
+  const [user, setUser] = useState({ name: 'Admin', role: 'admin' })
+  const [tab, setTab] = useState<Tab>('dashboard')
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  // Data
+  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [slots, setSlots] = useState<Slot[]>([])
+  const [bookings, setBookings] = useState<Booking[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [stats, setStats] = useState({ totalBookings: 0, todayBookings: 0, totalSubjects: 0, availableSlots: 0 })
+
+  // Modals
+  const [showSubjectModal, setShowSubjectModal] = useState(false)
+  const [showSlotModal, setShowSlotModal] = useState(false)
+  const [showUserModal, setShowUserModal] = useState(false)
+  const [editingSubject, setEditingSubject] = useState<Subject | null>(null)
+  const [editingUser, setEditingUser] = useState<User | null>(null)
+
+  // Filters
+  const [slotFilter, setSlotFilter] = useState({ subjectId: '', showPast: false })
+  const [bookingSearch, setBookingSearch] = useState('')
+
+  useEffect(() => {
+    if (isLoggedIn) loadAll()
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (isLoggedIn && tab === 'slots') loadSlots()
+  }, [tab, slotFilter])
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type })
+
+  const loadAll = async () => {
+    try {
+      const data = await api.get('/staff/data')
+      setSubjects(data.subjects)
+      setBookings(data.roster)
+      setUser(data.user)
+      loadStats()
+    } catch (e) { showToast('Error loading data', 'error') }
+  }
+
+  const loadStats = async () => {
+    try {
+      const s = await api.get('/staff/stats')
+      setStats(s)
+    } catch (e) { }
+  }
+
+  const loadSlots = async () => {
+    try {
+      let url = `/staff/slots?showPast=${slotFilter.showPast}`
+      if (slotFilter.subjectId) url += `&subjectId=${slotFilter.subjectId}`
+      const data = await api.get(url)
+      setSlots(data)
+    } catch (e) { showToast('Error loading slots', 'error') }
+  }
+
+  const loadUsers = async () => {
+    try {
+      const data = await api.get('/staff/users')
+      setUsers(data)
+    } catch (e) { showToast('Error loading users', 'error') }
+  }
+
+  const handleLogin = async (username: string, password: string) => {
+    try {
+      const data = await login(username, password)
+      setToken(data.token)
+      setUser({ name: data.name, role: data.role })
+      setIsLoggedIn(true)
+      showToast(`Welcome back, ${data.name}`)
+    } catch (e) { showToast('Invalid credentials', 'error') }
+  }
+
+  const handleLogout = () => { clearToken(); setIsLoggedIn(false) }
+
+  const filteredBookings = bookings.filter(b =>
+    !bookingSearch ||
+    b.studentName.toLowerCase().includes(bookingSearch.toLowerCase()) ||
+    b.studentId.toLowerCase().includes(bookingSearch.toLowerCase())
+  )
+
+  if (!isLoggedIn) return <LoginForm onLogin={handleLogin} toast={toast} onCloseToast={() => setToast(null)} />
+
+  return (
+    <div className="h-screen flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white border-r flex flex-col flex-shrink-0">
+        <div className="p-4 border-b">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">B</div>
+            <div><div className="font-bold leading-tight">Booking CMS</div><div className="text-xs text-green-600 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online</div></div>
+          </div>
+        </div>
+        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+          <div className="text-xs font-bold text-gray-400 uppercase mb-2 px-3">Overview</div>
+          <NavItem icon="fa-chart-pie" label="Dashboard" active={tab === 'dashboard'} onClick={() => setTab('dashboard')} />
+          <div className="text-xs font-bold text-gray-400 uppercase mb-2 mt-6 px-3">Management</div>
+          <NavItem icon="fa-calendar-check" label="Bookings" active={tab === 'bookings'} onClick={() => setTab('bookings')} />
+          <NavItem icon="fa-graduation-cap" label="Subjects" active={tab === 'subjects'} onClick={() => setTab('subjects')} />
+          <NavItem icon="fa-clock" label="Time Slots" active={tab === 'slots'} onClick={() => { setTab('slots'); loadSlots() }} />
+          <div className="text-xs font-bold text-gray-400 uppercase mb-2 mt-6 px-3">System</div>
+          <NavItem icon="fa-users" label="Users" active={tab === 'users'} onClick={() => { setTab('users'); loadUsers() }} />
+          <NavItem icon="fa-gear" label="Settings" active={tab === 'settings'} onClick={() => setTab('settings')} />
+        </nav>
+        <div className="p-4 border-t">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-sm font-bold text-indigo-600">{user.name.substring(0, 2).toUpperCase()}</div>
+            <div className="flex-1 min-w-0"><div className="text-sm font-semibold truncate">{user.name}</div><div className="text-xs text-gray-400">{user.role === 'admin' ? 'Administrator' : 'Staff'}</div></div>
+          </div>
+          <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2"><i className="fa-solid fa-right-from-bracket"></i> Sign Out</button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="flex-1 overflow-y-auto bg-gray-50 p-8">
+        {tab === 'dashboard' && <Dashboard stats={stats} bookings={bookings} onViewBooking={() => setTab('bookings')} />}
+        {tab === 'bookings' && <BookingsTab bookings={filteredBookings} search={bookingSearch} onSearchChange={setBookingSearch} onCancel={async (id) => { await api.del(`/staff/bookings/${id}`); loadAll(); showToast('Booking cancelled') }} />}
+        {tab === 'subjects' && <SubjectsTab subjects={subjects} onAdd={() => { setEditingSubject(null); setShowSubjectModal(true) }} onEdit={(s) => { setEditingSubject(s); setShowSubjectModal(true) }} onDelete={async (id) => { if (confirm('Delete this subject?')) { await api.del(`/staff/subjects/${id}`); loadAll(); showToast('Subject deleted') } }} />}
+        {tab === 'slots' && <SlotsTab slots={slots} subjects={subjects} filter={slotFilter} onFilterChange={setSlotFilter} onGenerate={() => setShowSlotModal(true)} onDelete={async (id) => { if (confirm('Delete this slot?')) { await api.del(`/staff/slots/${id}`); loadSlots(); showToast('Slot deleted') } }} />}
+        {tab === 'users' && <UsersTab users={users} onAdd={() => { setEditingUser(null); setShowUserModal(true) }} onEdit={(u) => { setEditingUser(u); setShowUserModal(true) }} onDelete={async (id) => { if (confirm('Delete this user?')) { await api.del(`/staff/users/${id}`); loadUsers(); showToast('User deleted') } }} />}
+        {tab === 'settings' && <SettingsTab onClearBookings={async () => { if (confirm('Delete ALL bookings?')) { await api.post('/staff/clear-bookings', {}); loadAll(); showToast('Bookings cleared') } }} />}
+      </main>
+
+      {/* Modals */}
+      {showSubjectModal && <SubjectModal subject={editingSubject} onClose={() => setShowSubjectModal(false)} onSave={async (data) => { if (editingSubject) await api.put(`/staff/subjects/${editingSubject.id}`, data); else await api.post('/staff/subjects', data); setShowSubjectModal(false); loadAll(); showToast(editingSubject ? 'Subject updated' : 'Subject created') }} />}
+      {showSlotModal && <SlotGenerateModal subjects={subjects} onClose={() => setShowSlotModal(false)} onGenerate={async (data) => { const r = await api.post('/staff/slots/generate', data); setShowSlotModal(false); loadSlots(); showToast(`Generated ${r.count} slots`) }} />}
+      {showUserModal && <UserModal user={editingUser} onClose={() => setShowUserModal(false)} onSave={async (data) => { if (editingUser) await api.put(`/staff/users/${editingUser.id}`, data); else await api.post('/staff/users', data); setShowUserModal(false); loadUsers(); showToast(editingUser ? 'User updated' : 'User created') }} />}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </div>
+  )
+}
+
+function NavItem({ icon, label, active, onClick }: { icon: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <div onClick={onClick} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition ${active ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+      <i className={`fa-solid ${icon} w-5`}></i>
+      <span className="font-medium">{label}</span>
+    </div>
+  )
+}
+
+function LoginForm({ onLogin, toast, onCloseToast }: { onLogin: (u: string, p: string) => void; toast: any; onCloseToast: () => void }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const handleSubmit = async () => {
+    setLoading(true)
+    await onLogin(username, password)
+    setLoading(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center p-4">
+      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm">
+        <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-xl flex items-center justify-center mb-6 text-2xl shadow-lg"><i className="fa-solid fa-shield-halved"></i></div>
+        <h1 className="text-2xl font-bold mb-1">Staff Portal</h1>
+        <p className="text-sm text-gray-500 mb-6">Sign in to manage your booking system.</p>
+        <div className="space-y-4">
+          <div><label className="block text-xs font-semibold text-gray-600 mb-1">Username</label><input value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" className="w-full p-3 bg-gray-50 border rounded-lg" /></div>
+          <div><label className="block text-xs font-semibold text-gray-600 mb-1">Password</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSubmit()} placeholder="Enter password" className="w-full p-3 bg-gray-50 border rounded-lg" /></div>
+          <button onClick={handleSubmit} disabled={loading} className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-bold py-3 rounded-lg hover:opacity-90 flex justify-center items-center gap-2 shadow-lg disabled:opacity-50">
+            {loading && <div className="spinner"></div>}
+            {loading ? 'Signing in...' : 'Login'}
+          </button>
+          <div className="text-center pt-2"><Link to="/" className="text-xs text-gray-400 hover:text-indigo-600 underline">← Back to Student View</Link></div>
+        </div>
+      </div>
+      {toast && <Toast message={toast.message} type={toast.type} onClose={onCloseToast} />}
+    </div>
+  )
+}
+
+
+function Dashboard({ stats, bookings, onViewBooking }: { stats: any; bookings: Booking[]; onViewBooking: () => void }) {
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="mb-8"><h1 className="text-2xl font-bold">Dashboard</h1><p className="text-gray-500">Overview of your booking system.</p></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <StatCard label="Total Bookings" value={stats.totalBookings} icon="fa-calendar-check" color="blue" />
+        <StatCard label="Today's Bookings" value={stats.todayBookings} icon="fa-calendar-day" color="green" />
+        <StatCard label="Active Subjects" value={stats.totalSubjects} icon="fa-graduation-cap" color="purple" />
+        <StatCard label="Available Slots" value={stats.availableSlots} icon="fa-clock" color="orange" />
+      </div>
+      <div className="bg-white rounded-xl border p-6">
+        <div className="flex justify-between items-center mb-4"><h3 className="font-bold">Recent Bookings</h3><button onClick={onViewBooking} className="text-sm text-indigo-600 hover:underline">View all →</button></div>
+        <div className="space-y-3">
+          {bookings.slice(0, 5).map(b => (
+            <div key={b.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-sm">{b.studentName.substring(0, 2).toUpperCase()}</div>
+                <div><div className="font-semibold text-sm">{b.studentName}</div><div className="text-xs text-gray-400">{b.subjectName}</div></div>
+              </div>
+              <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">{b.status}</span>
+            </div>
+          ))}
+          {bookings.length === 0 && <div className="text-center text-gray-400 py-4">No bookings yet</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatCard({ label, value, icon, color }: { label: string; value: number; icon: string; color: string }) {
+  const colors: Record<string, string> = { blue: 'bg-blue-100 text-blue-600', green: 'bg-green-100 text-green-600', purple: 'bg-purple-100 text-purple-600', orange: 'bg-orange-100 text-orange-600' }
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-gray-500 text-sm">{label}</span>
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colors[color]}`}><i className={`fa-solid ${icon}`}></i></div>
+      </div>
+      <div className="text-3xl font-bold">{value}</div>
+    </div>
+  )
+}
+
+function BookingsTab({ bookings, search, onSearchChange, onCancel }: { bookings: Booking[]; search: string; onSearchChange: (s: string) => void; onCancel: (id: string) => void }) {
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  
+  const copyToClipboard = (id: string) => {
+    navigator.clipboard.writeText(id)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+  
+  const shortId = (id: string) => id.length > 8 ? `${id.slice(0, 8)}...` : id
+  
+  // Format slot time as "h:mm AM - h:mm PM (dd/mm/yy)" in local timezone
+  const formatSlotTime = (slotStart: string | null, duration: number) => {
+    if (!slotStart) return 'Deleted Slot'
+    const start = new Date(slotStart)
+    const end = new Date(start.getTime() + duration * 60000)
+    const timeFormat = { hour: 'numeric', minute: '2-digit', hour12: true } as const
+    const startStr = start.toLocaleTimeString('en-US', timeFormat)
+    const endStr = end.toLocaleTimeString('en-US', timeFormat)
+    const dateStr = start.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    return `${startStr} - ${endStr} (${dateStr})`
+  }
+  
+  // Format submit timestamp in local timezone with AM/PM
+  const formatSubmitTime = (createdAt: string | null) => {
+    if (!createdAt) return '-'
+    const dt = new Date(createdAt)
+    const dateStr = dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return `${dateStr}, ${timeStr}`
+  }
+  
+  return (
+    <div className="max-w-7xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <div><h1 className="text-2xl font-bold">Bookings</h1><p className="text-gray-500">Manage student reservations.</p></div>
+      </div>
+      <div className="bg-white rounded-xl border p-4 mb-4">
+        <input value={search} onChange={e => onSearchChange(e.target.value)} placeholder="Search by name or ID..." className="w-full p-2 border rounded-lg bg-gray-50" />
+      </div>
+      <div className="bg-white rounded-xl border shadow-sm overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-50 border-b text-gray-500 uppercase text-xs font-semibold">
+            <tr>
+              <th className="p-4 pl-6">Booking ID</th>
+              <th className="p-4">Student</th>
+              <th className="p-4">Subject</th>
+              <th className="p-4">Slot Time</th>
+              <th className="p-4">Submitted</th>
+              <th className="p-4">Status</th>
+              <th className="p-4 text-right pr-6">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {bookings.map(b => (
+              <tr key={b.id} className="hover:bg-gray-50">
+                <td className="p-4 pl-6">
+                  <div className="flex items-center gap-1">
+                    <code className="text-xs bg-gray-100 px-2 py-1 rounded font-mono text-gray-600" title={b.id}>{shortId(b.id)}</code>
+                    <button onClick={() => copyToClipboard(b.id)} className="p-1 text-gray-400 hover:text-indigo-600 rounded" title="Copy full ID">
+                      <i className={`fa-solid ${copiedId === b.id ? 'fa-check text-green-500' : 'fa-copy'} text-xs`}></i>
+                    </button>
+                  </div>
+                </td>
+                <td className="p-4">
+                  <div className="font-semibold">{b.studentName}</div>
+                  <div className="text-xs text-gray-400">{b.studentId}</div>
+                  <div className="text-xs text-gray-400">{b.studentEmail}</div>
+                </td>
+                <td className="p-4"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">{b.subjectName}</span></td>
+                <td className="p-4 text-gray-600 whitespace-nowrap text-xs">{formatSlotTime(b.slotStart, b.slotDuration)}</td>
+                <td className="p-4 text-gray-500 whitespace-nowrap text-xs">{formatSubmitTime(b.createdAt)}</td>
+                <td className="p-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${b.status === 'confirmed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{b.status}</span></td>
+                <td className="p-4 pr-6 text-right"><button onClick={() => onCancel(b.id)} className="text-gray-400 hover:text-red-600 p-2 rounded hover:bg-red-50"><i className="fa-solid fa-trash-can"></i></button></td>
+              </tr>
+            ))}
+            {bookings.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-gray-400">No bookings found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function SubjectsTab({ subjects, onAdd, onEdit, onDelete }: { subjects: Subject[]; onAdd: () => void; onEdit: (s: Subject) => void; onDelete: (id: string) => void }) {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <div><h1 className="text-2xl font-bold">Subjects</h1><p className="text-gray-500">Manage faculties.</p></div>
+        <button onClick={onAdd} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"><i className="fa-solid fa-plus"></i> Add Subject</button>
+      </div>
+      <div className="space-y-3">
+        {subjects.map(s => (
+          <div key={s.id} className="bg-white border rounded-xl p-4 flex justify-between items-center hover:shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-white" style={{ background: s.color || '#4F46E5' }}><i className="fa-solid fa-graduation-cap text-lg"></i></div>
+              <div><div className="font-bold">{s.name}</div>{s.description && <div className="text-sm text-gray-500">{s.description}</div>}</div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => onEdit(s)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"><i className="fa-solid fa-pen"></i></button>
+              <button onClick={() => onDelete(s.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><i className="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        ))}
+        {subjects.length === 0 && <div className="text-center text-gray-400 py-8 bg-white rounded-xl border">No subjects yet.</div>}
+      </div>
+    </div>
+  )
+}
+
+function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelete }: { slots: Slot[]; subjects: Subject[]; filter: any; onFilterChange: (f: any) => void; onGenerate: () => void; onDelete: (id: string) => void }) {
+  const formatSlot = (s: Slot) => {
+    const dt = new Date(s.startTime)
+    const end = new Date(dt.getTime() + s.duration * 60000)
+    return { date: dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }), time: `${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` }
+  }
+  return (
+    <div className="max-w-6xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <div><h1 className="text-2xl font-bold">Time Slots</h1><p className="text-gray-500">Manage availability.</p></div>
+        <button onClick={onGenerate} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"><i className="fa-solid fa-plus"></i> Generate Slots</button>
+      </div>
+      <div className="bg-white rounded-xl border p-4 mb-4 flex gap-4 items-center">
+        <select value={filter.subjectId} onChange={e => onFilterChange({ ...filter, subjectId: e.target.value })} className="p-2 border rounded-lg bg-gray-50">
+          <option value="">All Subjects</option>
+          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={filter.showPast} onChange={e => onFilterChange({ ...filter, showPast: e.target.checked })} className="w-4 h-4 rounded" /><span className="text-sm">Show past</span></label>
+      </div>
+      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-50 border-b text-gray-500 uppercase text-xs font-semibold"><tr><th className="p-4 pl-6">Subject</th><th className="p-4">Date</th><th className="p-4">Time</th><th className="p-4">Duration</th><th className="p-4">Capacity</th><th className="p-4 text-right pr-6">Actions</th></tr></thead>
+          <tbody className="divide-y">
+            {slots.map(s => {
+              const f = formatSlot(s); const isFull = s.currentBookings >= s.maxCapacity; return (
+                <tr key={s.id} className={`hover:bg-gray-50 ${new Date(s.startTime) < new Date() ? 'opacity-50' : ''}`}>
+                  <td className="p-4 pl-6"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">{s.subjectName}</span></td>
+                  <td className="p-4 font-medium">{f.date}</td>
+                  <td className="p-4">{f.time}</td>
+                  <td className="p-4">{s.duration} min</td>
+                  <td className="p-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${isFull ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{s.currentBookings}/{s.maxCapacity}</span></td>
+                  <td className="p-4 pr-6 text-right"><button onClick={() => onDelete(s.id)} className="text-gray-400 hover:text-red-600 p-2 rounded hover:bg-red-50"><i className="fa-solid fa-trash"></i></button></td>
+                </tr>
+              )
+            })}
+            {slots.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">No slots found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function UsersTab({ users, onAdd, onEdit, onDelete }: { users: User[]; onAdd: () => void; onEdit: (u: User) => void; onDelete: (id: string) => void }) {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <div><h1 className="text-2xl font-bold">Users</h1><p className="text-gray-500">Manage staff accounts.</p></div>
+        <button onClick={onAdd} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"><i className="fa-solid fa-plus"></i> Add User</button>
+      </div>
+      <div className="space-y-3">
+        {users.map(u => (
+          <div key={u.id} className="bg-white border rounded-xl p-4 flex justify-between items-center hover:shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-indigo-600 font-bold">{u.name.substring(0, 2).toUpperCase()}</div>
+              <div><div className="font-bold">{u.name}</div><div className="text-sm text-gray-500">@{u.username}</div></div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${u.role === 'admin' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{u.role}</span>
+              <button onClick={() => onEdit(u)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"><i className="fa-solid fa-pen"></i></button>
+              <button onClick={() => onDelete(u.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><i className="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        ))}
+        {users.length === 0 && <div className="text-center text-gray-400 py-8 bg-white rounded-xl border">No users found.</div>}
+      </div>
+    </div>
+  )
+}
+
+function SettingsTab({ onClearBookings }: { onClearBookings: () => void }) {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="mb-8"><h1 className="text-2xl font-bold">Settings</h1><p className="text-gray-500">Configure your booking system.</p></div>
+      <div className="bg-white rounded-xl border border-red-200 p-6">
+        <h3 className="font-bold mb-4 text-red-600"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Danger Zone</h3>
+        <div className="flex justify-between items-center py-3">
+          <div><div className="font-medium">Clear All Bookings</div><div className="text-sm text-gray-500">Delete all booking records</div></div>
+          <button onClick={onClearBookings} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 text-sm font-medium">Clear</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function SubjectModal({ subject, onClose, onSave }: { subject: Subject | null; onClose: () => void; onSave: (data: any) => void }) {
+  const [form, setForm] = useState({ name: subject?.name || '', description: subject?.description || '', color: subject?.color || '#4F46E5', location: subject?.location || '', customFields: (subject?.customFields || []).join('\n'), active: subject?.active !== false })
+  const [loading, setLoading] = useState(false)
+  const colors = ['#4F46E5', '#059669', '#DC2626', '#D97706', '#7C3AED', '#DB2777']
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return
+    setLoading(true)
+    try {
+      await onSave({ name: form.name, description: form.description, color: form.color, location: form.location, customFields: form.customFields.split('\n').filter(f => f.trim()), active: form.active })
+    } catch (e) { }
+    setLoading(false)
+  }
+
+  return (
+    <Modal title={subject ? 'Edit Subject' : 'Add Subject'} onClose={onClose} footer={<><button onClick={onClose} className="flex-1 py-3 border rounded-lg font-semibold hover:bg-gray-100">Cancel</button><button onClick={handleSave} disabled={loading} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></>}>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Subject Name *</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Engineering" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Description</label><textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." rows={2} className="w-full p-3 border rounded-lg bg-gray-50 resize-none" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Color</label><div className="flex gap-2">{colors.map(c => <div key={c} onClick={() => setForm({ ...form, color: c })} className={`w-8 h-8 rounded-lg cursor-pointer border-2 ${form.color === c ? 'border-indigo-600 scale-110' : 'border-transparent'}`} style={{ background: c }}></div>)}</div></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Default Location</label><input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="e.g. Room 101" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Custom Fields (one per line)</label><textarea value={form.customFields} onChange={e => setForm({ ...form, customFields: e.target.value })} placeholder="e.g. Portfolio URL" rows={3} className="w-full p-3 border rounded-lg bg-gray-50 resize-none" /></div>
+      <div className="flex items-center gap-3"><label className="switch"><input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /><span className="switch-slider"></span></label><div><div className="font-medium text-sm">Active</div><div className="text-xs text-gray-500">Visible to students</div></div></div>
+    </Modal>
+  )
+}
+
+function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subject[]; onClose: () => void; onGenerate: (data: any) => void }) {
+  const [form, setForm] = useState({ subjectId: subjects[0]?.id || '', duration: 20, capacity: 1, breakTime: 0, location: '', startDate: new Date().toISOString().split('T')[0], endDate: '', startTime: '09:00', endTime: '17:00', days: [] as number[], isRecurring: false, lunchBreak: false, lunchStart: '12:00', lunchEnd: '13:00' })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleGenerate = async () => {
+    setError('')
+
+    // Validation
+    if (subjects.length === 0) {
+      setError('Please create a subject first before generating slots.')
+      return
+    }
+    if (!form.subjectId) {
+      setError('Please select a subject.')
+      return
+    }
+    if (!form.startDate) {
+      setError('Please select a date.')
+      return
+    }
+    if (form.isRecurring && form.days.length === 0) {
+      setError('Please select at least one day for recurring slots.')
+      return
+    }
+    if (form.isRecurring && !form.endDate) {
+      setError('Please select an end date for recurring slots.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      await onGenerate({
+        subjectId: form.subjectId,
+        startDate: form.startDate,
+        endDate: form.isRecurring ? form.endDate : null,
+        startTime: form.startTime,
+        endTime: form.endTime,
+        duration: form.duration,
+        capacity: form.capacity,
+        breakTime: form.breakTime,
+        location: form.location,
+        days: form.isRecurring ? form.days : null,
+        lunchBreak: form.lunchBreak ? { start: form.lunchStart, end: form.lunchEnd } : null
+      })
+    } catch (e: any) {
+      setError(e.message || 'Failed to generate slots')
+    }
+    setLoading(false)
+  }
+
+  const toggleDay = (d: number) => setForm({ ...form, days: form.days.includes(d) ? form.days.filter(x => x !== d) : [...form.days, d] })
+
+  // If no subjects, show a message
+  if (subjects.length === 0) {
+    return (
+      <Modal title="Generate Time Slots" onClose={onClose} footer={<button onClick={onClose} className="flex-1 py-3 border rounded-lg font-semibold hover:bg-gray-100">Close</button>}>
+        <div className="text-center py-8">
+          <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <i className="fa-solid fa-exclamation-triangle text-2xl text-yellow-600"></i>
+          </div>
+          <h3 className="font-bold text-lg mb-2">No Subjects Found</h3>
+          <p className="text-gray-500 text-sm">Please create a subject first before generating time slots.</p>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title="Generate Time Slots" onClose={onClose} footer={<><button onClick={onClose} className="flex-1 py-3 border rounded-lg font-semibold hover:bg-gray-100">Cancel</button><button onClick={handleGenerate} disabled={loading} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50">{loading ? 'Generating...' : 'Generate'}</button></>}>
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">{error}</div>}
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Subject *</label><select value={form.subjectId} onChange={e => setForm({ ...form, subjectId: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50">{subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Duration (min)</label><input type="number" value={form.duration} onChange={e => setForm({ ...form, duration: +e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Max Capacity</label><input type="number" value={form.capacity} onChange={e => setForm({ ...form, capacity: +e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Break Between (min)</label><input type="number" value={form.breakTime} onChange={e => setForm({ ...form, breakTime: +e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Location</label><input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Room" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      </div>
+      <div className="p-1 bg-gray-100 rounded-lg flex text-sm font-medium">
+        <button onClick={() => setForm({ ...form, isRecurring: false })} className={`flex-1 py-2 rounded ${!form.isRecurring ? 'shadow bg-white text-black' : 'text-gray-500'}`}>One Day</button>
+        <button onClick={() => setForm({ ...form, isRecurring: true })} className={`flex-1 py-2 rounded ${form.isRecurring ? 'shadow bg-white text-black' : 'text-gray-500'}`}>Recurring</button>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">{form.isRecurring ? 'Start Date' : 'Date'}</label><input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+        {form.isRecurring && <div><label className="block text-xs font-semibold text-gray-600 mb-1">End Date</label><input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>}
+      </div>
+      {form.isRecurring && <div><label className="block text-xs font-semibold text-gray-600 mb-1">Repeat On</label><div className="flex gap-2">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} onClick={() => toggleDay(i)} className={`flex-1 py-2 rounded border text-center text-sm font-bold cursor-pointer ${form.days.includes(i) ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-400'}`}>{d}</div>)}</div></div>}
+      <div className="grid grid-cols-2 gap-4">
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Start Time</label><input type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+        <div><label className="block text-xs font-semibold text-gray-600 mb-1">End Time</label><input type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      </div>
+      <div className="border rounded-lg p-4 bg-gray-50">
+        <div className="flex items-center gap-3 mb-3"><input type="checkbox" checked={form.lunchBreak} onChange={e => setForm({ ...form, lunchBreak: e.target.checked })} className="w-4 h-4 rounded" /><label className="font-medium text-sm cursor-pointer">Add Lunch Break</label></div>
+        {form.lunchBreak && <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-gray-500 mb-1">Break Start</label><input type="time" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} className="w-full p-2 border rounded-lg" /></div><div><label className="block text-xs text-gray-500 mb-1">Break End</label><input type="time" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} className="w-full p-2 border rounded-lg" /></div></div>}
+      </div>
+    </Modal>
+  )
+}
+
+function UserModal({ user, onClose, onSave }: { user: User | null; onClose: () => void; onSave: (data: any) => void }) {
+  const [form, setForm] = useState({ name: user?.name || '', username: user?.username || '', email: user?.email || '', password: '', role: user?.role || 'staff' })
+  const [loading, setLoading] = useState(false)
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.username.trim()) return
+    if (!user && !form.password) return
+    setLoading(true)
+    try {
+      const data: any = { name: form.name, email: form.email, role: form.role }
+      if (form.password) data.password = form.password
+      if (!user) data.username = form.username
+      await onSave(data)
+    } catch (e) { }
+    setLoading(false)
+  }
+
+  return (
+    <Modal title={user ? 'Edit User' : 'Add User'} onClose={onClose} footer={<><button onClick={onClose} className="flex-1 py-3 border rounded-lg font-semibold hover:bg-gray-100">Cancel</button><button onClick={handleSave} disabled={loading} className="flex-1 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50">{loading ? 'Saving...' : 'Save'}</button></>}>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Full Name *</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. John Doe" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Username *</label><input value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} disabled={!!user} placeholder="e.g. johndoe" className="w-full p-3 border rounded-lg bg-gray-50 disabled:opacity-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Email</label><input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="john@example.com" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">{user ? 'Password' : 'Password *'}</label><input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder={user ? 'Leave blank to keep current' : 'Enter password'} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+      <div><label className="block text-xs font-semibold text-gray-600 mb-1">Role</label><select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50"><option value="staff">Staff</option><option value="admin">Admin</option></select></div>
+    </Modal>
+  )
+}

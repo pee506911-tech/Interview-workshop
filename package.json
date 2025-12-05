@@ -1,0 +1,34 @@
+{
+  "name": "booking-system",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "api": "wrangler pages dev dist --compatibility-flags=nodejs_compat --port 8788",
+    "deploy": "bun run build && wrangler pages deploy dist",
+    "db:setup": "bun run src/db/setup.ts",
+    "db:migrate": "bun run src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@tidbcloud/serverless": "^0.2.0",
+    "mysql2": "^3.11.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router-dom": "^7.10.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "autoprefixer": "^10.4.22",
+    "postcss": "^8.5.6",
+    "tailwindcss": "3",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6",
+    "wrangler": "^4.51.0"
+  }
+}
