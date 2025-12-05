@@ -477,14 +477,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     }
 
     // POST /api/staff/slots/generate - Batch insert optimization
+    // Supports: multiple dates OR recurring pattern, multiple time ranges
     if (method === 'POST' && path === '/staff/slots/generate') {
       const req = await request.json() as any;
-      const { subjectId, startDate, endDate, startTime, endTime, duration, capacity, days, breakTime, location, lunchBreak } = req;
+      const { subjectId, dates, startDate, endDate, timeRanges, startTime, endTime, duration, capacity, days, breakTime, location, lunchBreak } = req;
       
       if (!validateString(subjectId, 1, 36)) return json({ error: 'Invalid subject ID' }, 400, corsOrigin);
       
-      const [sh, sm] = startTime.split(':').map(Number);
-      const [eh, em] = endTime.split(':').map(Number);
+      // Support both old format (startTime/endTime) and new format (timeRanges)
+      const ranges = timeRanges && timeRanges.length > 0 
+        ? timeRanges 
+        : [{ startTime: startTime || '09:00', endTime: endTime || '17:00' }];
       
       let lunchStartMin = 0, lunchEndMin = 0;
       if (lunchBreak?.start && lunchBreak?.end) {
@@ -494,36 +497,60 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         lunchEndMin = leh * 60 + lem;
       }
       
-      let start = new Date(startDate);
-      let end = endDate ? new Date(endDate) : new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      end.setHours(0, 0, 0, 0);
+      // Determine which dates to generate slots for
+      let targetDates: Date[] = [];
+      
+      if (dates && Array.isArray(dates) && dates.length > 0) {
+        // Multiple specific dates mode
+        targetDates = dates.filter((d: string) => d).map((d: string) => {
+          const date = new Date(d);
+          date.setHours(0, 0, 0, 0);
+          return date;
+        });
+      } else if (startDate) {
+        // Recurring mode (or single date via old format)
+        let start = new Date(startDate);
+        let end = endDate ? new Date(endDate) : new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        end.setHours(0, 0, 0, 0);
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          if (days && days.length > 0 && !days.includes(d.getDay())) continue;
+          targetDates.push(new Date(d));
+        }
+      }
+      
+      if (targetDates.length === 0) return json({ error: 'No valid dates provided' }, 400, corsOrigin);
       
       const slots: any[] = [];
       const slotInterval = duration + (breakTime || 0);
 
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (days && !days.includes(d.getDay())) continue;
-        
-        let curr = new Date(d);
-        curr.setHours(sh, sm, 0, 0);
-        let endT = new Date(d);
-        endT.setHours(eh, em, 0, 0);
-        
-        while (curr < endT) {
-          const currMin = curr.getHours() * 60 + curr.getMinutes();
-          const slotEndMin = currMin + duration;
+      for (const targetDate of targetDates) {
+        // Generate slots for each time range
+        for (const range of ranges) {
+          const [sh, sm] = range.startTime.split(':').map(Number);
+          const [eh, em] = range.endTime.split(':').map(Number);
           
-          if (lunchBreak && lunchStartMin && lunchEndMin && currMin < lunchEndMin && slotEndMin > lunchStartMin) {
-            curr.setHours(Math.floor(lunchEndMin / 60), lunchEndMin % 60, 0, 0);
-            continue;
-          }
+          let curr = new Date(targetDate);
+          curr.setHours(sh, sm, 0, 0);
+          let endT = new Date(targetDate);
+          endT.setHours(eh, em, 0, 0);
           
-          if (new Date(curr.getTime() + duration * 60000) <= endT) {
-            slots.push([uuid(), subjectId, new Date(curr).toISOString().slice(0, 19).replace('T', ' '), 
-                       duration, capacity, 0, sanitizeString(location || '')]);
+          while (curr < endT) {
+            const currMin = curr.getHours() * 60 + curr.getMinutes();
+            const slotEndMin = currMin + duration;
+            
+            if (lunchBreak && lunchStartMin && lunchEndMin && currMin < lunchEndMin && slotEndMin > lunchStartMin) {
+              curr.setHours(Math.floor(lunchEndMin / 60), lunchEndMin % 60, 0, 0);
+              continue;
+            }
+            
+            if (new Date(curr.getTime() + duration * 60000) <= endT) {
+              slots.push([uuid(), subjectId, new Date(curr).toISOString().slice(0, 19).replace('T', ' '), 
+                         duration, capacity, 0, sanitizeString(location || '')]);
+            }
+            curr.setMinutes(curr.getMinutes() + slotInterval);
           }
-          curr.setMinutes(curr.getMinutes() + slotInterval);
         }
       }
       

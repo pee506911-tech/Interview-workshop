@@ -455,14 +455,27 @@ function SubjectModal({ subject, onClose, onSave }: { subject: Subject | null; o
 }
 
 function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subject[]; onClose: () => void; onGenerate: (data: any) => void }) {
-  const [form, setForm] = useState({ subjectId: subjects[0]?.id || '', duration: 20, capacity: 1, breakTime: 0, location: '', startDate: new Date().toISOString().split('T')[0], endDate: '', startTime: '09:00', endTime: '17:00', days: [] as number[], isRecurring: false, lunchBreak: false, lunchStart: '12:00', lunchEnd: '13:00' })
+  const [form, setForm] = useState({ 
+    subjectId: subjects[0]?.id || '', 
+    duration: 20, 
+    capacity: 1, 
+    breakTime: 0, 
+    location: '', 
+    dates: [new Date().toISOString().split('T')[0]] as string[],
+    endDate: '', 
+    timeRanges: [{ startTime: '09:00', endTime: '17:00' }] as { startTime: string; endTime: string }[],
+    days: [] as number[], 
+    mode: 'dates' as 'dates' | 'recurring', 
+    lunchBreak: false, 
+    lunchStart: '12:00', 
+    lunchEnd: '13:00' 
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   const handleGenerate = async () => {
     setError('')
 
-    // Validation
     if (subjects.length === 0) {
       setError('Please create a subject first before generating slots.')
       return
@@ -471,16 +484,20 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
       setError('Please select a subject.')
       return
     }
-    if (!form.startDate) {
-      setError('Please select a date.')
+    if (form.mode === 'dates' && form.dates.length === 0) {
+      setError('Please select at least one date.')
       return
     }
-    if (form.isRecurring && form.days.length === 0) {
+    if (form.mode === 'recurring' && form.days.length === 0) {
       setError('Please select at least one day for recurring slots.')
       return
     }
-    if (form.isRecurring && !form.endDate) {
-      setError('Please select an end date for recurring slots.')
+    if (form.mode === 'recurring' && (!form.dates[0] || !form.endDate)) {
+      setError('Please select start and end dates for recurring slots.')
+      return
+    }
+    if (form.timeRanges.length === 0) {
+      setError('Please add at least one time range.')
       return
     }
 
@@ -488,15 +505,15 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
     try {
       await onGenerate({
         subjectId: form.subjectId,
-        startDate: form.startDate,
-        endDate: form.isRecurring ? form.endDate : null,
-        startTime: form.startTime,
-        endTime: form.endTime,
+        dates: form.mode === 'dates' ? form.dates : null,
+        startDate: form.mode === 'recurring' ? form.dates[0] : null,
+        endDate: form.mode === 'recurring' ? form.endDate : null,
+        timeRanges: form.timeRanges,
         duration: form.duration,
         capacity: form.capacity,
         breakTime: form.breakTime,
         location: form.location,
-        days: form.isRecurring ? form.days : null,
+        days: form.mode === 'recurring' ? form.days : null,
         lunchBreak: form.lunchBreak ? { start: form.lunchStart, end: form.lunchEnd } : null
       })
     } catch (e: any) {
@@ -507,7 +524,14 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
 
   const toggleDay = (d: number) => setForm({ ...form, days: form.days.includes(d) ? form.days.filter(x => x !== d) : [...form.days, d] })
 
-  // If no subjects, show a message
+  const addDate = () => setForm({ ...form, dates: [...form.dates, ''] })
+  const removeDate = (idx: number) => setForm({ ...form, dates: form.dates.filter((_, i) => i !== idx) })
+  const updateDate = (idx: number, val: string) => setForm({ ...form, dates: form.dates.map((d, i) => i === idx ? val : d) })
+
+  const addTimeRange = () => setForm({ ...form, timeRanges: [...form.timeRanges, { startTime: '09:00', endTime: '17:00' }] })
+  const removeTimeRange = (idx: number) => setForm({ ...form, timeRanges: form.timeRanges.filter((_, i) => i !== idx) })
+  const updateTimeRange = (idx: number, field: 'startTime' | 'endTime', val: string) => setForm({ ...form, timeRanges: form.timeRanges.map((t, i) => i === idx ? { ...t, [field]: val } : t) })
+
   if (subjects.length === 0) {
     return (
       <Modal title="Generate Time Slots" onClose={onClose} footer={<button onClick={onClose} className="flex-1 py-3 border rounded-lg font-semibold hover:bg-gray-100">Close</button>}>
@@ -534,19 +558,57 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
         <div><label className="block text-xs font-semibold text-gray-600 mb-1">Break Between (min)</label><input type="number" value={form.breakTime} onChange={e => setForm({ ...form, breakTime: +e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
         <div><label className="block text-xs font-semibold text-gray-600 mb-1">Location</label><input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Room" className="w-full p-3 border rounded-lg bg-gray-50" /></div>
       </div>
+
+      {/* Mode Toggle */}
       <div className="p-1 bg-gray-100 rounded-lg flex text-sm font-medium">
-        <button onClick={() => setForm({ ...form, isRecurring: false })} className={`flex-1 py-2 rounded ${!form.isRecurring ? 'shadow bg-white text-black' : 'text-gray-500'}`}>One Day</button>
-        <button onClick={() => setForm({ ...form, isRecurring: true })} className={`flex-1 py-2 rounded ${form.isRecurring ? 'shadow bg-white text-black' : 'text-gray-500'}`}>Recurring</button>
+        <button onClick={() => setForm({ ...form, mode: 'dates' })} className={`flex-1 py-2 rounded ${form.mode === 'dates' ? 'shadow bg-white text-black' : 'text-gray-500'}`}>Multiple Dates</button>
+        <button onClick={() => setForm({ ...form, mode: 'recurring' })} className={`flex-1 py-2 rounded ${form.mode === 'recurring' ? 'shadow bg-white text-black' : 'text-gray-500'}`}>Recurring</button>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div><label className="block text-xs font-semibold text-gray-600 mb-1">{form.isRecurring ? 'Start Date' : 'Date'}</label><input type="date" value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
-        {form.isRecurring && <div><label className="block text-xs font-semibold text-gray-600 mb-1">End Date</label><input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>}
+
+      {/* Dates Section */}
+      {form.mode === 'dates' ? (
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="text-xs font-semibold text-gray-600">Dates *</label>
+            <button onClick={addDate} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"><i className="fa-solid fa-plus"></i> Add Date</button>
+          </div>
+          <div className="space-y-2 max-h-32 overflow-y-auto">
+            {form.dates.map((date, idx) => (
+              <div key={idx} className="flex gap-2 items-center">
+                <input type="date" value={date} onChange={e => updateDate(idx, e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+                {form.dates.length > 1 && <button onClick={() => removeDate(idx)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><i className="fa-solid fa-times"></i></button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-xs font-semibold text-gray-600 mb-1">Start Date</label><input type="date" value={form.dates[0] || ''} onChange={e => setForm({ ...form, dates: [e.target.value] })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+            <div><label className="block text-xs font-semibold text-gray-600 mb-1">End Date</label><input type="date" value={form.endDate} onChange={e => setForm({ ...form, endDate: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
+          </div>
+          <div><label className="block text-xs font-semibold text-gray-600 mb-1">Repeat On</label><div className="flex gap-2">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} onClick={() => toggleDay(i)} className={`flex-1 py-2 rounded border text-center text-sm font-bold cursor-pointer ${form.days.includes(i) ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-400'}`}>{d}</div>)}</div></div>
+        </>
+      )}
+
+      {/* Time Ranges Section */}
+      <div>
+        <div className="flex justify-between items-center mb-2">
+          <label className="text-xs font-semibold text-gray-600">Time Ranges *</label>
+          <button onClick={addTimeRange} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"><i className="fa-solid fa-plus"></i> Add Time Range</button>
+        </div>
+        <div className="space-y-2 max-h-32 overflow-y-auto">
+          {form.timeRanges.map((tr, idx) => (
+            <div key={idx} className="flex gap-2 items-center">
+              <input type="time" value={tr.startTime} onChange={e => updateTimeRange(idx, 'startTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              <span className="text-gray-400">to</span>
+              <input type="time" value={tr.endTime} onChange={e => updateTimeRange(idx, 'endTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              {form.timeRanges.length > 1 && <button onClick={() => removeTimeRange(idx)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><i className="fa-solid fa-times"></i></button>}
+            </div>
+          ))}
+        </div>
       </div>
-      {form.isRecurring && <div><label className="block text-xs font-semibold text-gray-600 mb-1">Repeat On</label><div className="flex gap-2">{['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} onClick={() => toggleDay(i)} className={`flex-1 py-2 rounded border text-center text-sm font-bold cursor-pointer ${form.days.includes(i) ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-400'}`}>{d}</div>)}</div></div>}
-      <div className="grid grid-cols-2 gap-4">
-        <div><label className="block text-xs font-semibold text-gray-600 mb-1">Start Time</label><input type="time" value={form.startTime} onChange={e => setForm({ ...form, startTime: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
-        <div><label className="block text-xs font-semibold text-gray-600 mb-1">End Time</label><input type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} className="w-full p-3 border rounded-lg bg-gray-50" /></div>
-      </div>
+
       <div className="border rounded-lg p-4 bg-gray-50">
         <div className="flex items-center gap-3 mb-3"><input type="checkbox" checked={form.lunchBreak} onChange={e => setForm({ ...form, lunchBreak: e.target.checked })} className="w-4 h-4 rounded" /><label className="font-medium text-sm cursor-pointer">Add Lunch Break</label></div>
         {form.lunchBreak && <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-gray-500 mb-1">Break Start</label><input type="time" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} className="w-full p-2 border rounded-lg" /></div><div><label className="block text-xs text-gray-500 mb-1">Break End</label><input type="time" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} className="w-full p-2 border rounded-lg" /></div></div>}
