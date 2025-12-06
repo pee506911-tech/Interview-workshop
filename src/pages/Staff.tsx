@@ -32,7 +32,7 @@ export default function Staff() {
   const [editingUser, setEditingUser] = useState<User | null>(null)
 
   // Filters
-  const [slotFilter, setSlotFilter] = useState({ subjectId: '', showPast: false })
+  const [slotFilter, setSlotFilter] = useState({ subjectId: '', showPast: false, dateFrom: '', dateTo: '', status: '' })
   const [bookingSearch, setBookingSearch] = useState('')
 
   useEffect(() => {
@@ -66,7 +66,14 @@ export default function Staff() {
     try {
       let url = `/staff/slots?showPast=${slotFilter.showPast}`
       if (slotFilter.subjectId) url += `&subjectId=${slotFilter.subjectId}`
-      const data = await api.get(url)
+      if (slotFilter.dateFrom) url += `&dateFrom=${slotFilter.dateFrom}`
+      if (slotFilter.dateTo) url += `&dateTo=${slotFilter.dateTo}`
+      if (slotFilter.status === 'available') url += `&availableOnly=true`
+      let data = await api.get(url)
+      // Client-side filter for "full" status
+      if (slotFilter.status === 'full') {
+        data = data.filter((s: Slot) => s.currentBookings >= s.maxCapacity)
+      }
       setSlots(data)
     } catch (e) { showToast('Error loading slots', 'error') }
   }
@@ -133,9 +140,9 @@ export default function Staff() {
         {tab === 'dashboard' && <Dashboard stats={stats} bookings={bookings} onViewBooking={() => setTab('bookings')} />}
         {tab === 'bookings' && <BookingsTab bookings={filteredBookings} search={bookingSearch} onSearchChange={setBookingSearch} onCancel={async (id) => { await api.del(`/staff/bookings/${id}`); loadAll(); showToast('Booking cancelled') }} />}
         {tab === 'subjects' && <SubjectsTab subjects={subjects} onAdd={() => { setEditingSubject(null); setShowSubjectModal(true) }} onEdit={(s) => { setEditingSubject(s); setShowSubjectModal(true) }} onDelete={async (id) => { if (confirm('Delete this subject?')) { await api.del(`/staff/subjects/${id}`); loadAll(); showToast('Subject deleted') } }} />}
-        {tab === 'slots' && <SlotsTab slots={slots} subjects={subjects} filter={slotFilter} onFilterChange={setSlotFilter} onGenerate={() => setShowSlotModal(true)} onDelete={async (id) => { if (confirm('Delete this slot?')) { await api.del(`/staff/slots/${id}`); loadSlots(); showToast('Slot deleted') } }} />}
+        {tab === 'slots' && <SlotsTab slots={slots} subjects={subjects} filter={slotFilter} onFilterChange={setSlotFilter} onGenerate={() => setShowSlotModal(true)} onDelete={async (id) => { await api.del(`/staff/slots/${id}`); loadSlots(); showToast('Slot deleted') }} onBulkDelete={async (ids) => { await api.post('/staff/slots/bulk-delete', { slotIds: ids }); loadSlots(); showToast(`Deleted ${ids.length} slots`) }} onUpdate={async (id, data) => { try { await api.put(`/staff/slots/${id}`, data); loadSlots(); showToast('Slot updated') } catch (e) { showToast('Failed to update', 'error') } }} onAddRow={async (data) => { try { await api.post('/staff/slots', data); loadSlots(); showToast('Slot added') } catch (e) { showToast('Failed to add slot', 'error') } }} />}
         {tab === 'users' && <UsersTab users={users} onAdd={() => { setEditingUser(null); setShowUserModal(true) }} onEdit={(u) => { setEditingUser(u); setShowUserModal(true) }} onDelete={async (id) => { if (confirm('Delete this user?')) { await api.del(`/staff/users/${id}`); loadUsers(); showToast('User deleted') } }} />}
-        {tab === 'settings' && <SettingsTab onClearBookings={async () => { if (confirm('Delete ALL bookings?')) { await api.post('/staff/clear-bookings', {}); loadAll(); showToast('Bookings cleared') } }} />}
+        {tab === 'settings' && <SettingsTab onClearBookings={async () => { if (confirm('Delete ALL bookings?')) { try { await api.post('/staff/clear-bookings', {}); loadAll(); showToast('Bookings cleared') } catch (e: any) { showToast(e.message || 'Failed to clear bookings', 'error') } } }} />}
       </main>
 
       {/* Modals */}
@@ -342,44 +349,354 @@ function SubjectsTab({ subjects, onAdd, onEdit, onDelete }: { subjects: Subject[
   )
 }
 
-function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelete }: { slots: Slot[]; subjects: Subject[]; filter: any; onFilterChange: (f: any) => void; onGenerate: () => void; onDelete: (id: string) => void }) {
-  const formatSlot = (s: Slot) => {
-    const dt = new Date(s.startTime)
-    const end = new Date(dt.getTime() + s.duration * 60000)
-    return { date: dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }), time: `${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` }
+function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelete, onBulkDelete, onUpdate, onAddRow }: { 
+  slots: Slot[]; subjects: Subject[]; filter: any; onFilterChange: (f: any) => void; 
+  onGenerate: () => void; onDelete: (id: string) => void; onBulkDelete?: (ids: string[]) => void;
+  onUpdate?: (id: string, data: any) => void; onAddRow?: (data: any) => void 
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [newRows, setNewRows] = useState<any[]>([])
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Toggle selection
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selected)
+    if (newSet.has(id)) newSet.delete(id)
+    else newSet.add(id)
+    setSelected(newSet)
   }
+
+  const toggleSelectAll = () => {
+    if (selected.size === slots.length) setSelected(new Set())
+    else setSelected(new Set(slots.map(s => s.id)))
+  }
+
+  const handleBulkDelete = () => {
+    if (selected.size === 0) return
+    if (confirm(`Delete ${selected.size} selected slot(s)?`)) {
+      onBulkDelete?.(Array.from(selected))
+      setSelected(new Set())
+    }
+  }
+
+  // Inline editing
+  const startEdit = (id: string, field: string, value: string) => {
+    setEditingCell({ id, field })
+    setEditValue(value)
+  }
+
+  const saveEdit = () => {
+    if (!editingCell || !onUpdate) return
+    const { id, field } = editingCell
+    const slot = slots.find(s => s.id === id)
+    if (!slot) return
+
+    let updateData: any = {}
+    if (field === 'date') {
+      // Keep the same time, just change the date (all in local timezone)
+      const oldDt = new Date(slot.startTime)
+      const hours = oldDt.getHours()
+      const minutes = oldDt.getMinutes()
+      const [y, m, d] = editValue.split('-').map(Number)
+      const newDt = new Date(y, m - 1, d, hours, minutes, 0, 0)
+      updateData.startTime = newDt.toISOString()
+    } else if (field === 'time') {
+      // Keep the same date, just change the time (all in local timezone)
+      const oldDt = new Date(slot.startTime)
+      const [h, min] = editValue.split(':').map(Number)
+      const newDt = new Date(oldDt.getFullYear(), oldDt.getMonth(), oldDt.getDate(), h, min, 0, 0)
+      updateData.startTime = newDt.toISOString()
+    } else if (field === 'duration') {
+      updateData.duration = parseInt(editValue) || slot.duration
+    } else if (field === 'capacity') {
+      updateData.maxCapacity = parseInt(editValue) || slot.maxCapacity
+    } else if (field === 'subject') {
+      updateData.subjectId = editValue
+    }
+
+    onUpdate(id, updateData)
+    setEditingCell(null)
+  }
+
+  const cancelEdit = () => setEditingCell(null)
+
+  // Add new row - default to tomorrow to ensure it shows (not filtered by showPast)
+  const addNewRow = () => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    setNewRows([...newRows, {
+      id: `new-${Date.now()}`,
+      subjectId: subjects[0]?.id || '',
+      date: tomorrow.toISOString().split('T')[0],
+      time: '09:00',
+      duration: 20,
+      capacity: 1
+    }])
+  }
+
+  const updateNewRow = (idx: number, field: string, value: any) => {
+    setNewRows(newRows.map((r, i) => i === idx ? { ...r, [field]: value } : r))
+  }
+
+  const saveNewRow = async (idx: number) => {
+    const row = newRows[idx]
+    if (!row.subjectId || !row.date || !row.time) return
+    
+    const dt = new Date(`${row.date}T${row.time}`)
+    await onAddRow?.({
+      subjectId: row.subjectId,
+      startTime: dt.toISOString(),
+      duration: row.duration,
+      maxCapacity: row.capacity
+    })
+    setNewRows(newRows.filter((_, i) => i !== idx))
+  }
+
+  const removeNewRow = (idx: number) => {
+    setNewRows(newRows.filter((_, i) => i !== idx))
+  }
+
+  // Stats
+  const totalSlots = slots.length
+  const availableSlots = slots.filter(s => s.currentBookings < s.maxCapacity && new Date(s.startTime) > new Date()).length
+  const fullSlots = slots.filter(s => s.currentBookings >= s.maxCapacity).length
+
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div><h1 className="text-2xl font-bold">Time Slots</h1><p className="text-gray-500">Manage availability.</p></div>
-        <button onClick={onGenerate} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"><i className="fa-solid fa-plus"></i> Generate Slots</button>
+    <div className="max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">Time Slots</h1>
+          <p className="text-gray-500">Manage availability and schedules.</p>
+        </div>
+        <button onClick={onGenerate} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 shadow-sm">
+          <i className="fa-solid fa-plus"></i> Generate Slots
+        </button>
       </div>
-      <div className="bg-white rounded-xl border p-4 mb-4 flex gap-4 items-center">
-        <select value={filter.subjectId} onChange={e => onFilterChange({ ...filter, subjectId: e.target.value })} className="p-2 border rounded-lg bg-gray-50">
-          <option value="">All Subjects</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={filter.showPast} onChange={e => onFilterChange({ ...filter, showPast: e.target.checked })} className="w-4 h-4 rounded" /><span className="text-sm">Show past</span></label>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl border p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600"><i className="fa-solid fa-calendar"></i></div>
+          <div><div className="text-2xl font-bold">{totalSlots}</div><div className="text-xs text-gray-500">Total Slots</div></div>
+        </div>
+        <div className="bg-white rounded-xl border p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600"><i className="fa-solid fa-check"></i></div>
+          <div><div className="text-2xl font-bold">{availableSlots}</div><div className="text-xs text-gray-500">Available</div></div>
+        </div>
+        <div className="bg-white rounded-xl border p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center text-red-600"><i className="fa-solid fa-ban"></i></div>
+          <div><div className="text-2xl font-bold">{fullSlots}</div><div className="text-xs text-gray-500">Fully Booked</div></div>
+        </div>
       </div>
-      <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-gray-50 border-b text-gray-500 uppercase text-xs font-semibold"><tr><th className="p-4 pl-6">Subject</th><th className="p-4">Date</th><th className="p-4">Time</th><th className="p-4">Duration</th><th className="p-4">Capacity</th><th className="p-4 text-right pr-6">Actions</th></tr></thead>
-          <tbody className="divide-y">
-            {slots.map(s => {
-              const f = formatSlot(s); const isFull = s.currentBookings >= s.maxCapacity; return (
-                <tr key={s.id} className={`hover:bg-gray-50 ${new Date(s.startTime) < new Date() ? 'opacity-50' : ''}`}>
-                  <td className="p-4 pl-6"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">{s.subjectName}</span></td>
-                  <td className="p-4 font-medium">{f.date}</td>
-                  <td className="p-4">{f.time}</td>
-                  <td className="p-4">{s.duration} min</td>
-                  <td className="p-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${isFull ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{s.currentBookings}/{s.maxCapacity}</span></td>
-                  <td className="p-4 pr-6 text-right"><button onClick={() => onDelete(s.id)} className="text-gray-400 hover:text-red-600 p-2 rounded hover:bg-red-50"><i className="fa-solid fa-trash"></i></button></td>
+
+      {/* Filters */}
+      <div className="bg-white rounded-xl border p-4 mb-4">
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Subject</label>
+            <select value={filter.subjectId} onChange={e => onFilterChange({ ...filter, subjectId: e.target.value })} className="w-full p-2 border rounded-lg bg-gray-50">
+              <option value="">All Subjects</option>
+              {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Date From</label>
+            <input type="date" value={filter.dateFrom || ''} onChange={e => onFilterChange({ ...filter, dateFrom: e.target.value })} className="w-full p-2 border rounded-lg bg-gray-50" />
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Date To</label>
+            <input type="date" value={filter.dateTo || ''} onChange={e => onFilterChange({ ...filter, dateTo: e.target.value })} className="w-full p-2 border rounded-lg bg-gray-50" />
+          </div>
+          <div className="min-w-[150px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+            <select value={filter.status || ''} onChange={e => onFilterChange({ ...filter, status: e.target.value })} className="w-full p-2 border rounded-lg bg-gray-50">
+              <option value="">All Status</option>
+              <option value="available">Available</option>
+              <option value="full">Fully Booked</option>
+            </select>
+          </div>
+          <div className="flex items-end gap-4 pt-5">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={filter.showPast} onChange={e => onFilterChange({ ...filter, showPast: e.target.checked })} className="w-4 h-4 rounded" />
+              <span className="text-sm">Show past</span>
+            </label>
+            <button onClick={() => onFilterChange({ subjectId: '', showPast: false, dateFrom: '', dateTo: '', status: '' })} className="text-sm text-gray-500 hover:text-indigo-600">
+              <i className="fa-solid fa-rotate-left mr-1"></i> Reset
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex justify-between items-center mb-3">
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <>
+              <span className="text-sm text-gray-600 bg-indigo-50 px-2 py-1 rounded">{selected.size} selected</span>
+              <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100 flex items-center gap-1">
+                <i className="fa-solid fa-trash"></i> Delete
+              </button>
+              <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-gray-500 text-sm hover:text-gray-700">Clear</button>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={addNewRow} className="px-3 py-1.5 bg-green-50 text-green-600 rounded-lg text-sm font-medium hover:bg-green-100 flex items-center gap-1">
+            <i className="fa-solid fa-plus"></i> Add Row
+          </button>
+          <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 ${showFilters ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            <i className="fa-solid fa-filter"></i> Filter
+          </button>
+          <span className="text-sm text-gray-400 ml-2">{slots.length} rows</span>
+        </div>
+      </div>
+
+      {/* Spreadsheet Table */}
+      <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse" style={{ minWidth: '900px' }}>
+            <thead>
+              <tr className="bg-gray-100 border-b-2 border-gray-200">
+                <th className="w-10 p-2 border-r border-gray-200 text-center">
+                  <input type="checkbox" checked={slots.length > 0 && selected.size === slots.length} onChange={toggleSelectAll} className="w-4 h-4 rounded" />
+                </th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[150px]">Subject</th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[130px]">Date</th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[100px]">Time</th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[80px]">Duration</th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[80px]">Capacity</th>
+                <th className="p-2 border-r border-gray-200 text-left font-semibold text-gray-600 text-xs uppercase tracking-wide min-w-[80px]">Booked</th>
+                <th className="p-2 text-center font-semibold text-gray-600 text-xs uppercase tracking-wide w-20">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* New Rows */}
+              {newRows.map((row, idx) => (
+                <tr key={row.id} className="bg-green-50 border-b border-gray-200 hover:bg-green-100">
+                  <td className="p-2 border-r border-gray-200 text-center text-green-600"><i className="fa-solid fa-plus"></i></td>
+                  <td className="p-1 border-r border-gray-200">
+                    <select value={row.subjectId} onChange={e => updateNewRow(idx, 'subjectId', e.target.value)} className="w-full p-1.5 border border-green-300 rounded bg-white text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                      {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-1 border-r border-gray-200">
+                    <input type="date" value={row.date} onChange={e => updateNewRow(idx, 'date', e.target.value)} className="w-full p-1.5 border border-green-300 rounded bg-white text-sm focus:ring-2 focus:ring-green-500" />
+                  </td>
+                  <td className="p-1 border-r border-gray-200">
+                    <input type="time" value={row.time} onChange={e => updateNewRow(idx, 'time', e.target.value)} className="w-full p-1.5 border border-green-300 rounded bg-white text-sm focus:ring-2 focus:ring-green-500" />
+                  </td>
+                  <td className="p-1 border-r border-gray-200">
+                    <input type="number" value={row.duration} onChange={e => updateNewRow(idx, 'duration', +e.target.value)} className="w-full p-1.5 border border-green-300 rounded bg-white text-sm focus:ring-2 focus:ring-green-500" />
+                  </td>
+                  <td className="p-1 border-r border-gray-200">
+                    <input type="number" value={row.capacity} onChange={e => updateNewRow(idx, 'capacity', +e.target.value)} className="w-full p-1.5 border border-green-300 rounded bg-white text-sm focus:ring-2 focus:ring-green-500" />
+                  </td>
+                  <td className="p-2 border-r border-gray-200 text-gray-400 text-center">-</td>
+                  <td className="p-2 text-center">
+                    <button onClick={() => saveNewRow(idx)} className="text-green-600 hover:text-green-700 p-1 mr-1" title="Save"><i className="fa-solid fa-check"></i></button>
+                    <button onClick={() => removeNewRow(idx)} className="text-red-400 hover:text-red-600 p-1" title="Cancel"><i className="fa-solid fa-times"></i></button>
+                  </td>
                 </tr>
-              )
-            })}
-            {slots.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">No slots found.</td></tr>}
-          </tbody>
-        </table>
+              ))}
+              {/* Existing Slots */}
+              {slots.map(s => {
+                const dt = new Date(s.startTime)
+                const isPast = dt < new Date()
+                const isFull = s.currentBookings >= s.maxCapacity
+                const isEditing = (field: string) => editingCell?.id === s.id && editingCell?.field === field
+                // Format date as YYYY-MM-DD in local timezone for the date input
+                const localDateStr = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+                // Format time as HH:MM in local timezone for the time input
+                const localTimeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+
+                return (
+                  <tr key={s.id} className={`border-b border-gray-200 ${isPast ? 'bg-gray-50 text-gray-400' : 'hover:bg-blue-50'} ${selected.has(s.id) ? 'bg-indigo-50' : ''}`}>
+                    <td className="p-2 border-r border-gray-200 text-center">
+                      <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelect(s.id)} className="w-4 h-4 rounded" />
+                    </td>
+                    {/* Subject Cell */}
+                    <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'subject', s.subjectId)}>
+                      {isEditing('subject') ? (
+                        <select value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm">
+                          {subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
+                        </select>
+                      ) : (
+                        <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">{s.subjectName}</span>
+                      )}
+                    </td>
+                    {/* Date Cell */}
+                    <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'date', localDateStr)}>
+                      {isEditing('date') ? (
+                        <input type="date" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
+                      ) : (
+                        <span className="px-2 py-1">{dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                      )}
+                    </td>
+                    {/* Time Cell */}
+                    <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'time', localTimeStr)}>
+                      {isEditing('time') ? (
+                        <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
+                      ) : (
+                        <span className="px-2 py-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      )}
+                    </td>
+                    {/* Duration Cell */}
+                    <td className="p-1 border-r border-gray-200 cursor-pointer text-center" onDoubleClick={() => startEdit(s.id, 'duration', String(s.duration))}>
+                      {isEditing('duration') ? (
+                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
+                      ) : (
+                        <span>{s.duration} min</span>
+                      )}
+                    </td>
+                    {/* Capacity Cell */}
+                    <td className="p-1 border-r border-gray-200 cursor-pointer text-center" onDoubleClick={() => startEdit(s.id, 'capacity', String(s.maxCapacity))}>
+                      {isEditing('capacity') ? (
+                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
+                      ) : (
+                        <span>{s.maxCapacity}</span>
+                      )}
+                    </td>
+                    {/* Booked Cell */}
+                    <td className="p-2 border-r border-gray-200 text-center">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${isFull ? 'bg-red-100 text-red-700' : s.currentBookings > 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {s.currentBookings}
+                      </span>
+                    </td>
+                    {/* Actions Cell */}
+                    <td className="p-2 text-center">
+                      <button onClick={() => onDelete(s.id)} className="text-gray-400 hover:text-red-600 p-1" title="Delete">
+                        <i className="fa-solid fa-trash text-xs"></i>
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+              {slots.length === 0 && newRows.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="p-12 text-center">
+                    <div className="text-gray-400">
+                      <i className="fa-solid fa-table text-4xl mb-3"></i>
+                      <p className="mb-2">No slots yet</p>
+                      <div className="flex gap-2 justify-center">
+                        <button onClick={addNewRow} className="text-green-600 hover:underline text-sm">+ Add row</button>
+                        <span className="text-gray-300">or</span>
+                        <button onClick={onGenerate} className="text-indigo-600 hover:underline text-sm">Generate slots</button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {/* Footer */}
+        <div className="bg-gray-50 border-t border-gray-200 px-4 py-2 flex justify-between items-center text-xs text-gray-500">
+          <span>Double-click cell to edit • Press Enter to save • Esc to cancel</span>
+          <span>{slots.length} total slots • {availableSlots} available • {fullSlots} full</span>
+        </div>
       </div>
     </div>
   )

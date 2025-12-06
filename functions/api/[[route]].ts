@@ -476,6 +476,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       return json({ success: true }, 200, corsOrigin);
     }
 
+    // POST /api/staff/slots - Create single slot
+    if (method === 'POST' && path === '/staff/slots') {
+      const { subjectId, startTime, duration, maxCapacity, location } = await request.json() as any;
+      if (!validateString(subjectId, 1, 36)) return json({ error: 'Invalid subject ID' }, 400, corsOrigin);
+      if (!startTime) return json({ error: 'Start time required' }, 400, corsOrigin);
+      
+      const slotId = uuid();
+      await db.execute(
+        'INSERT INTO slots (id, subject_id, start_time, duration, max_capacity, current_bookings, location) VALUES (?, ?, ?, ?, ?, 0, ?)',
+        [slotId, subjectId, new Date(startTime).toISOString().slice(0, 19).replace('T', ' '), duration || 20, maxCapacity || 1, sanitizeString(location || '')]
+      );
+      return json({ success: true, id: slotId }, 200, corsOrigin);
+    }
+
     // POST /api/staff/slots/generate - Batch insert optimization
     // Supports: multiple dates OR recurring pattern, multiple time ranges
     if (method === 'POST' && path === '/staff/slots/generate') {
