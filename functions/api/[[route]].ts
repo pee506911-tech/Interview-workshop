@@ -250,8 +250,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         [subjectId]
       );
       const rows = Array.isArray(result) ? result : (result.rows || []);
+      // Helper to convert DB timestamp (stored as UTC) to ISO string
+      const toUTCISOString = (dbTime: any) => {
+        if (!dbTime) return null;
+        const timeStr = dbTime instanceof Date ? dbTime.toISOString() : String(dbTime);
+        if (timeStr.includes('T') && timeStr.endsWith('Z')) return timeStr;
+        if (timeStr.includes('T')) return timeStr + 'Z';
+        return timeStr.replace(' ', 'T') + 'Z';
+      };
       return json(rows.map((r: any) => ({
-        id: r.id, subjectId: r.subject_id, startTime: new Date(r.start_time).toISOString(),
+        id: r.id, subjectId: r.subject_id, startTime: toUTCISOString(r.start_time),
         duration: r.duration, maxCapacity: r.max_capacity, currentBookings: r.current_bookings
       })), 200, corsOrigin);
     }
@@ -654,9 +662,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const result = await db.execute(query, params);
       const rows = Array.isArray(result) ? result : (result.rows || []);
       
+      // Helper to convert DB timestamp (stored as UTC) to ISO string
+      const toUTCISOString = (dbTime: any) => {
+        if (!dbTime) return null;
+        const timeStr = dbTime instanceof Date ? dbTime.toISOString() : String(dbTime);
+        // If already has T and Z, return as-is
+        if (timeStr.includes('T') && timeStr.endsWith('Z')) return timeStr;
+        // If has T but no Z, append Z
+        if (timeStr.includes('T')) return timeStr + 'Z';
+        // Format: "2024-12-19 02:52:00" -> "2024-12-19T02:52:00Z"
+        return timeStr.replace(' ', 'T') + 'Z';
+      };
+      
       return json(rows.map((r: any) => ({
         id: r.id, subjectId: r.subject_id, subjectName: r.subject_name, teacher: r.teacher,
-        startTime: new Date(r.start_time).toISOString(), duration: r.duration,
+        startTime: toUTCISOString(r.start_time), duration: r.duration,
         maxCapacity: r.max_capacity, currentBookings: r.current_bookings, location: r.location || ''
       })), 200, corsOrigin);
     }
@@ -674,15 +694,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     if (method === 'PUT' && path.match(/^\/staff\/slots\/[^/]+$/)) {
       const slotId = path.split('/')[3];
       if (!validateString(slotId, 1, 36)) return json({ error: 'Invalid slot ID' }, 400, corsOrigin);
-      const { maxCapacity, startTime, duration, location } = await request.json() as any;
+      const { maxCapacity, startTime, duration, location, subjectId } = await request.json() as any;
       
       const updates: string[] = [];
       const params: any[] = [];
       
       if (maxCapacity !== undefined) { updates.push('max_capacity = ?'); params.push(maxCapacity); }
-      if (startTime) { updates.push('start_time = ?'); params.push(startTime.replace('T', ' ').slice(0, 19)); }
+      if (startTime) { updates.push('start_time = ?'); params.push(new Date(startTime).toISOString().slice(0, 19).replace('T', ' ')); }
       if (duration !== undefined) { updates.push('duration = ?'); params.push(duration); }
       if (location !== undefined) { updates.push('location = ?'); params.push(sanitizeString(location)); }
+      if (subjectId !== undefined) { updates.push('subject_id = ?'); params.push(subjectId); }
       
       if (updates.length > 0) {
         params.push(slotId);

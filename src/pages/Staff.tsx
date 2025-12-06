@@ -387,11 +387,19 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
     setEditValue(value)
   }
 
-  const saveEdit = () => {
+  const saveEdit = (overrideValue?: string) => {
     if (!editingCell || !onUpdate) return
     const { id, field } = editingCell
     const slot = slots.find(s => s.id === id)
     if (!slot) return
+
+    const valueToUse = overrideValue !== undefined ? overrideValue : editValue
+    
+    // Don't save if value is empty or unchanged
+    if (!valueToUse) {
+      setEditingCell(null)
+      return
+    }
 
     let updateData: any = {}
     if (field === 'date') {
@@ -399,21 +407,29 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       const oldDt = new Date(slot.startTime)
       const hours = oldDt.getHours()
       const minutes = oldDt.getMinutes()
-      const [y, m, d] = editValue.split('-').map(Number)
+      const parts = valueToUse.split('-')
+      if (parts.length !== 3) { setEditingCell(null); return }
+      const [y, m, d] = parts.map(Number)
+      if (isNaN(y) || isNaN(m) || isNaN(d)) { setEditingCell(null); return }
       const newDt = new Date(y, m - 1, d, hours, minutes, 0, 0)
+      if (isNaN(newDt.getTime())) { setEditingCell(null); return }
       updateData.startTime = newDt.toISOString()
     } else if (field === 'time') {
       // Keep the same date, just change the time (all in local timezone)
       const oldDt = new Date(slot.startTime)
-      const [h, min] = editValue.split(':').map(Number)
+      const parts = valueToUse.split(':')
+      if (parts.length < 2) { setEditingCell(null); return }
+      const [h, min] = parts.map(Number)
+      if (isNaN(h) || isNaN(min)) { setEditingCell(null); return }
       const newDt = new Date(oldDt.getFullYear(), oldDt.getMonth(), oldDt.getDate(), h, min, 0, 0)
+      if (isNaN(newDt.getTime())) { setEditingCell(null); return }
       updateData.startTime = newDt.toISOString()
     } else if (field === 'duration') {
-      updateData.duration = parseInt(editValue) || slot.duration
+      updateData.duration = parseInt(valueToUse) || slot.duration
     } else if (field === 'capacity') {
-      updateData.maxCapacity = parseInt(editValue) || slot.maxCapacity
+      updateData.maxCapacity = parseInt(valueToUse) || slot.maxCapacity
     } else if (field === 'subject') {
-      updateData.subjectId = editValue
+      updateData.subjectId = valueToUse
     }
 
     onUpdate(id, updateData)
@@ -620,7 +636,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                     {/* Subject Cell */}
                     <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'subject', s.subjectId)}>
                       {isEditing('subject') ? (
-                        <select value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm">
+                        <select value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm">
                           {subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
                         </select>
                       ) : (
@@ -630,7 +646,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                     {/* Date Cell */}
                     <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'date', localDateStr)}>
                       {isEditing('date') ? (
-                        <input type="date" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
+                        <input type="date" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
                       ) : (
                         <span className="px-2 py-1">{dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</span>
                       )}
@@ -638,7 +654,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                     {/* Time Cell */}
                     <td className="p-1 border-r border-gray-200 cursor-pointer" onDoubleClick={() => startEdit(s.id, 'time', localTimeStr)}>
                       {isEditing('time') ? (
-                        <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
+                        <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
                       ) : (
                         <span className="px-2 py-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       )}
@@ -646,7 +662,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                     {/* Duration Cell */}
                     <td className="p-1 border-r border-gray-200 cursor-pointer text-center" onDoubleClick={() => startEdit(s.id, 'duration', String(s.duration))}>
                       {isEditing('duration') ? (
-                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
+                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
                       ) : (
                         <span>{s.duration} min</span>
                       )}
@@ -654,7 +670,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                     {/* Capacity Cell */}
                     <td className="p-1 border-r border-gray-200 cursor-pointer text-center" onDoubleClick={() => startEdit(s.id, 'capacity', String(s.maxCapacity))}>
                       {isEditing('capacity') ? (
-                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
+                        <input type="number" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm text-center" />
                       ) : (
                         <span>{s.maxCapacity}</span>
                       )}
