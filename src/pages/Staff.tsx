@@ -241,6 +241,7 @@ function StatCard({ label, value, icon, color }: { label: string; value: number;
 
 function BookingsTab({ bookings, search, onSearchChange, onCancel }: { bookings: Booking[]; search: string; onSearchChange: (s: string) => void; onCancel: (id: string) => void }) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [exportStatus, setExportStatus] = useState<string | null>(null)
   
   const copyToClipboard = (id: string) => {
     navigator.clipboard.writeText(id)
@@ -270,12 +271,90 @@ function BookingsTab({ bookings, search, onSearchChange, onCancel }: { bookings:
     const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
     return `${dateStr}, ${timeStr}`
   }
+
+  // Format for export (cleaner format)
+  const formatSlotForExport = (slotStart: string | null, duration: number) => {
+    if (!slotStart) return { date: '', time: '', endTime: '' }
+    const start = new Date(slotStart)
+    const end = new Date(start.getTime() + duration * 60000)
+    const date = start.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const time = start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    const endTime = end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return { date, time, endTime }
+  }
+
+  // Export to XLSX
+  const exportToXLSX = async () => {
+    setExportStatus('Generating...')
+    try {
+      // Dynamically import xlsx library
+      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs' as any)
+      
+      const data = bookings.map(b => {
+        const slot = formatSlotForExport(b.slotStart, b.slotDuration)
+        return {
+          'Booking ID': b.id,
+          'Student Name': b.studentName,
+          'Student ID': b.studentId,
+          'Email': b.studentEmail,
+          'Subject': b.subjectName,
+          'Date': slot.date,
+          'Start Time': slot.time,
+          'End Time': slot.endTime,
+          'Duration (min)': b.slotDuration,
+          'Status': b.status,
+          'Submitted': formatSubmitTime(b.createdAt)
+        }
+      })
+      
+      const ws = XLSX.utils.json_to_sheet(data)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Bookings')
+      
+      // Auto-size columns
+      const colWidths = Object.keys(data[0] || {}).map(key => ({ wch: Math.max(key.length, 15) }))
+      ws['!cols'] = colWidths
+      
+      XLSX.writeFile(wb, `bookings_${new Date().toISOString().split('T')[0]}.xlsx`)
+      setExportStatus('Downloaded!')
+    } catch (e) {
+      console.error('Export error:', e)
+      setExportStatus('Error!')
+    }
+    setTimeout(() => setExportStatus(null), 2000)
+  }
+
+  // Copy as TSV for Google Sheets
+  const copyForGoogleSheets = () => {
+    const headers = ['Booking ID', 'Student Name', 'Student ID', 'Email', 'Subject', 'Date', 'Start Time', 'End Time', 'Duration (min)', 'Status', 'Submitted']
+    const rows = bookings.map(b => {
+      const slot = formatSlotForExport(b.slotStart, b.slotDuration)
+      return [b.id, b.studentName, b.studentId, b.studentEmail, b.subjectName, slot.date, slot.time, slot.endTime, b.slotDuration, b.status, formatSubmitTime(b.createdAt)]
+    })
+    const tsv = [headers, ...rows].map(row => row.join('\t')).join('\n')
+    navigator.clipboard.writeText(tsv)
+    setExportStatus('Copied! Paste in Google Sheets')
+    setTimeout(() => setExportStatus(null), 3000)
+  }
   
   return (
     <div className="max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <div><h1 className="text-2xl font-bold">Bookings</h1><p className="text-gray-500">Manage student reservations.</p></div>
+        <div className="flex gap-2">
+          <button onClick={copyForGoogleSheets} className="px-3 py-2 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 flex items-center gap-2 text-sm font-medium" title="Copy data for Google Sheets">
+            <i className="fa-solid fa-table"></i> Copy for Sheets
+          </button>
+          <button onClick={exportToXLSX} className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 flex items-center gap-2 text-sm font-medium">
+            <i className="fa-solid fa-file-excel"></i> Export XLSX
+          </button>
+        </div>
       </div>
+      {exportStatus && (
+        <div className="mb-4 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm flex items-center gap-2">
+          <i className="fa-solid fa-circle-info"></i> {exportStatus}
+        </div>
+      )}
       <div className="bg-white rounded-xl border p-4 mb-4">
         <input value={search} onChange={e => onSearchChange(e.target.value)} placeholder="Search by name or ID..." className="w-full p-2 border rounded-lg bg-gray-50" />
       </div>

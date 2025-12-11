@@ -346,9 +346,35 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         const slotInfo = (Array.isArray(slotDetails) ? slotDetails : (slotDetails.rows || []))[0] as any;
         
         if (slotInfo) {
-          const slotDate = new Date(slotInfo.start_time);
-          // Fire and forget - don't block the response
-          fetch(env.EMAIL_API_URL, {
+          // Parse the stored time string directly (it's stored as local time without timezone)
+          // Format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
+          const timeStr = String(slotInfo.start_time).replace('T', ' ').replace('Z', '');
+          const match = timeStr.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+          
+          let slotDateStr = 'Unknown date';
+          let slotTimeStr = 'Unknown time';
+          
+          if (match) {
+            const [, year, month, day, hour, minute] = match;
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            
+            // Calculate day of week using Zeller's formula
+            let m = parseInt(month), y = parseInt(year), d = parseInt(day);
+            if (m < 3) { m += 12; y--; }
+            const dow = (d + Math.floor((13 * (m + 1)) / 5) + (y % 100) + Math.floor((y % 100) / 4) + Math.floor(Math.floor(y / 100) / 4) - 2 * Math.floor(y / 100) + 7 * 6) % 7;
+            
+            slotDateStr = `${dayNames[dow]}, ${monthNames[parseInt(month) - 1]} ${parseInt(day)}, ${year}`;
+            
+            // Format time as 12-hour with AM/PM
+            let h = parseInt(hour);
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            h = h % 12 || 12;
+            slotTimeStr = `${h}:${minute} ${ampm}`;
+          }
+          
+          // Use waitUntil if available (Cloudflare Workers) to ensure email is sent
+          const emailPromise = fetch(env.EMAIL_API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -356,13 +382,20 @@ export const onRequest: PagesFunction<Env> = async (context) => {
               to: studentEmail,
               studentName,
               subjectName: slotInfo.subject_name,
-              slotDate: slotDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-              slotTime: slotDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              slotDate: slotDateStr,
+              slotTime: slotTimeStr,
               duration: slotInfo.duration,
               location: slotInfo.location || '',
               bookingId
             })
-          }).catch(() => {}); // Ignore email errors
+          }).catch((err) => {
+            console.error('Email send error:', err);
+          });
+          
+          // If context has waitUntil, use it to ensure the email is sent even after response
+          if (context && typeof (context as any).waitUntil === 'function') {
+            (context as any).waitUntil(emailPromise);
+          }
         }
       }
       
