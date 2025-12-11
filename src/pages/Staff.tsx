@@ -401,16 +401,6 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       return
     }
 
-    // Helper to format date as local ISO string (no timezone conversion)
-    const toLocalISOString = (dt: Date) => {
-      const y = dt.getFullYear()
-      const m = String(dt.getMonth() + 1).padStart(2, '0')
-      const d = String(dt.getDate()).padStart(2, '0')
-      const h = String(dt.getHours()).padStart(2, '0')
-      const min = String(dt.getMinutes()).padStart(2, '0')
-      return `${y}-${m}-${d}T${h}:${min}:00`
-    }
-
     let updateData: any = {}
     if (field === 'date') {
       // Keep the same time, just change the date (all in local timezone)
@@ -423,7 +413,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(y) || isNaN(m) || isNaN(d)) { setEditingCell(null); return }
       const newDt = new Date(y, m - 1, d, hours, minutes, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = toLocalISOString(newDt)
+      updateData.startTime = newDt.toISOString()
     } else if (field === 'time') {
       // Keep the same date, just change the time (all in local timezone)
       const oldDt = new Date(slot.startTime)
@@ -433,7 +423,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(h) || isNaN(min)) { setEditingCell(null); return }
       const newDt = new Date(oldDt.getFullYear(), oldDt.getMonth(), oldDt.getDate(), h, min, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = toLocalISOString(newDt)
+      updateData.startTime = newDt.toISOString()
     } else if (field === 'duration') {
       updateData.duration = parseInt(valueToUse) || slot.duration
     } else if (field === 'capacity') {
@@ -470,10 +460,10 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
     const row = newRows[idx]
     if (!row.subjectId || !row.date || !row.time) return
     
-    // Send as local time string (no timezone conversion)
+    const dt = new Date(`${row.date}T${row.time}`)
     await onAddRow?.({
       subjectId: row.subjectId,
-      startTime: `${row.date}T${row.time}:00`,
+      startTime: dt.toISOString(),
       duration: row.duration,
       maxCapacity: row.capacity
     })
@@ -666,7 +656,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                       {isEditing('time') ? (
                         <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
                       ) : (
-                        <span className="px-2 py-1">{dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                        <span className="px-2 py-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       )}
                     </td>
                     {/* Duration Cell */}
@@ -937,63 +927,24 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
       {/* Time Ranges Section */}
       <div>
         <div className="flex justify-between items-center mb-2">
-          <label className="text-xs font-semibold text-gray-600">Time Ranges * <span className="text-gray-400 font-normal">(AM/PM)</span></label>
+          <label className="text-xs font-semibold text-gray-600">Time Ranges *</label>
           <button onClick={addTimeRange} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"><i className="fa-solid fa-plus"></i> Add Time Range</button>
         </div>
         <div className="space-y-2 max-h-32 overflow-y-auto">
-          {form.timeRanges.map((tr, idx) => {
-            const formatTimeLabel = (time: string) => {
-              const [h, m] = time.split(':').map(Number)
-              const period = h >= 12 ? 'PM' : 'AM'
-              const hour12 = h % 12 || 12
-              return `${hour12}:${String(m).padStart(2, '0')} ${period}`
-            }
-            return (
-              <div key={idx} className="flex gap-2 items-center">
-                <div className="flex-1 flex items-center gap-1">
-                  <input type="time" value={tr.startTime} onChange={e => updateTimeRange(idx, 'startTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
-                  <span className="text-xs text-gray-500 whitespace-nowrap">{formatTimeLabel(tr.startTime)}</span>
-                </div>
-                <span className="text-gray-400">to</span>
-                <div className="flex-1 flex items-center gap-1">
-                  <input type="time" value={tr.endTime} onChange={e => updateTimeRange(idx, 'endTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
-                  <span className="text-xs text-gray-500 whitespace-nowrap">{formatTimeLabel(tr.endTime)}</span>
-                </div>
-                {form.timeRanges.length > 1 && <button onClick={() => removeTimeRange(idx)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><i className="fa-solid fa-times"></i></button>}
-              </div>
-            )
-          })}
+          {form.timeRanges.map((tr, idx) => (
+            <div key={idx} className="flex gap-2 items-center">
+              <input type="time" value={tr.startTime} onChange={e => updateTimeRange(idx, 'startTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              <span className="text-gray-400">to</span>
+              <input type="time" value={tr.endTime} onChange={e => updateTimeRange(idx, 'endTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              {form.timeRanges.length > 1 && <button onClick={() => removeTimeRange(idx)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><i className="fa-solid fa-times"></i></button>}
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="border rounded-lg p-4 bg-gray-50">
         <div className="flex items-center gap-3 mb-3"><input type="checkbox" checked={form.lunchBreak} onChange={e => setForm({ ...form, lunchBreak: e.target.checked })} className="w-4 h-4 rounded" /><label className="font-medium text-sm cursor-pointer">Add Lunch Break</label></div>
-        {form.lunchBreak && (() => {
-          const formatTimeLabel = (time: string) => {
-            const [h, m] = time.split(':').map(Number)
-            const period = h >= 12 ? 'PM' : 'AM'
-            const hour12 = h % 12 || 12
-            return `${hour12}:${String(m).padStart(2, '0')} ${period}`
-          }
-          return (
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Break Start</label>
-                <div className="flex items-center gap-1">
-                  <input type="time" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} className="flex-1 p-2 border rounded-lg" />
-                  <span className="text-xs text-gray-500">{formatTimeLabel(form.lunchStart)}</span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Break End</label>
-                <div className="flex items-center gap-1">
-                  <input type="time" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} className="flex-1 p-2 border rounded-lg" />
-                  <span className="text-xs text-gray-500">{formatTimeLabel(form.lunchEnd)}</span>
-                </div>
-              </div>
-            </div>
-          )
-        })()}
+        {form.lunchBreak && <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-gray-500 mb-1">Break Start</label><input type="time" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} className="w-full p-2 border rounded-lg" /></div><div><label className="block text-xs text-gray-500 mb-1">Break End</label><input type="time" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} className="w-full p-2 border rounded-lg" /></div></div>}
       </div>
     </Modal>
   )

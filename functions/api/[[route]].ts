@@ -491,13 +491,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!startTime) return json({ error: 'Start time required' }, 400, corsOrigin);
       
       const slotId = uuid();
-      // Parse the ISO string and store as local time (strip timezone)
-      // Input: "2024-12-11T13:00:00.000Z" or "2024-12-11T13:00:00"
-      // Output: "2024-12-11 13:00:00" (stored as-is, no timezone conversion)
-      const timeStr = startTime.replace('T', ' ').replace('Z', '').slice(0, 19);
       await db.execute(
         'INSERT INTO slots (id, subject_id, start_time, duration, max_capacity, current_bookings, location) VALUES (?, ?, ?, ?, ?, 0, ?)',
-        [slotId, subjectId, timeStr, duration || 20, maxCapacity || 1, sanitizeString(location || '')]
+        [slotId, subjectId, new Date(startTime).toISOString().slice(0, 19).replace('T', ' '), duration || 20, maxCapacity || 1, sanitizeString(location || '')]
       );
       return json({ success: true, id: slotId }, 200, corsOrigin);
     }
@@ -553,32 +549,29 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
       for (const targetDate of targetDates) {
         // Generate slots for each time range
-        // Extract date parts to build time strings without timezone conversion
-        const dateStr = targetDate.toISOString().slice(0, 10); // YYYY-MM-DD
-        
         for (const range of ranges) {
           const [sh, sm] = range.startTime.split(':').map(Number);
           const [eh, em] = range.endTime.split(':').map(Number);
           
-          let currMin = sh * 60 + sm;
-          const endMin = eh * 60 + em;
+          let curr = new Date(targetDate);
+          curr.setHours(sh, sm, 0, 0);
+          let endT = new Date(targetDate);
+          endT.setHours(eh, em, 0, 0);
           
-          while (currMin < endMin) {
+          while (curr < endT) {
+            const currMin = curr.getHours() * 60 + curr.getMinutes();
             const slotEndMin = currMin + duration;
             
             if (lunchBreak && lunchStartMin && lunchEndMin && currMin < lunchEndMin && slotEndMin > lunchStartMin) {
-              currMin = lunchEndMin;
+              curr.setHours(Math.floor(lunchEndMin / 60), lunchEndMin % 60, 0, 0);
               continue;
             }
             
-            if (slotEndMin <= endMin) {
-              const hour = Math.floor(currMin / 60);
-              const minute = currMin % 60;
-              // Store as local time string directly (no timezone conversion)
-              const timeStr = `${dateStr} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-              slots.push([uuid(), subjectId, timeStr, duration, capacity, 0, sanitizeString(location || '')]);
+            if (new Date(curr.getTime() + duration * 60000) <= endT) {
+              slots.push([uuid(), subjectId, new Date(curr).toISOString().slice(0, 19).replace('T', ' '), 
+                         duration, capacity, 0, sanitizeString(location || '')]);
             }
-            currMin += slotInterval;
+            curr.setMinutes(curr.getMinutes() + slotInterval);
           }
         }
       }
@@ -707,12 +700,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const params: any[] = [];
       
       if (maxCapacity !== undefined) { updates.push('max_capacity = ?'); params.push(maxCapacity); }
-      if (startTime) { 
-        // Store as local time (strip timezone, no conversion)
-        const timeStr = startTime.replace('T', ' ').replace('Z', '').slice(0, 19);
-        updates.push('start_time = ?'); 
-        params.push(timeStr); 
-      }
+      if (startTime) { updates.push('start_time = ?'); params.push(new Date(startTime).toISOString().slice(0, 19).replace('T', ' ')); }
       if (duration !== undefined) { updates.push('duration = ?'); params.push(duration); }
       if (location !== undefined) { updates.push('location = ?'); params.push(sanitizeString(location)); }
       if (subjectId !== undefined) { updates.push('subject_id = ?'); params.push(subjectId); }

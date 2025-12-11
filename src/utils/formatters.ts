@@ -1,7 +1,7 @@
 import type { Slot } from '../types'
 
 /**
- * Format a slot's time range for display (AM/PM format)
+ * Format a slot's time range for display
  */
 export function formatTimeRange(slot: Slot): string {
     const start = new Date(slot.startTime)
@@ -9,11 +9,10 @@ export function formatTimeRange(slot: Slot): string {
 
     const options: Intl.DateTimeFormatOptions = {
         hour: 'numeric',
-        minute: '2-digit',
-        hour12: true
+        minute: '2-digit'
     }
 
-    return `${start.toLocaleTimeString('en-US', options)} - ${end.toLocaleTimeString('en-US', options)}`
+    return `${start.toLocaleTimeString([], options)} - ${end.toLocaleTimeString([], options)}`
 }
 
 /**
