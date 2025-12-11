@@ -1,25 +1,18 @@
 import type { Slot } from '../types'
 
 /**
- * Format time as AM/PM manually (works in all environments including Cloudflare Workers)
- */
-export function formatTimeAMPM(date: Date): string {
-    let hours = date.getHours()
-    const minutes = date.getMinutes()
-    const ampm = hours >= 12 ? 'PM' : 'AM'
-    hours = hours % 12
-    hours = hours ? hours : 12 // 0 should be 12
-    const minuteStr = minutes < 10 ? '0' + minutes : String(minutes)
-    return `${hours}:${minuteStr} ${ampm}`
-}
-
-/**
  * Format a slot's time range for display
  */
 export function formatTimeRange(slot: Slot): string {
     const start = new Date(slot.startTime)
     const end = new Date(start.getTime() + slot.duration * 60000)
-    return `${formatTimeAMPM(start)} - ${formatTimeAMPM(end)}`
+
+    const options: Intl.DateTimeFormatOptions = {
+        hour: 'numeric',
+        minute: '2-digit'
+    }
+
+    return `${start.toLocaleTimeString([], options)} - ${end.toLocaleTimeString([], options)}`
 }
 
 /**

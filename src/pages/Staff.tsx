@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import Toast from '../components/Toast'
 import Modal from '../components/Modal'
 import { api, login, getToken, setToken, clearToken } from '../api'
-import { formatTimeAMPM } from '../utils/formatters'
 
 interface Subject { id: string; name: string; description?: string; color?: string; location?: string; customFields?: string[]; active?: boolean }
 interface Slot { id: string; subjectId: string; subjectName: string; startTime: string; duration: number; maxCapacity: number; currentBookings: number }
@@ -251,27 +250,25 @@ function BookingsTab({ bookings, search, onSearchChange, onCancel }: { bookings:
   
   const shortId = (id: string) => id.length > 8 ? `${id.slice(0, 8)}...` : id
   
-  // Format date as dd/mm/yy manually
-  const formatDateDMY = (dt: Date) => {
-    const d = String(dt.getDate()).padStart(2, '0')
-    const m = String(dt.getMonth() + 1).padStart(2, '0')
-    const y = String(dt.getFullYear()).slice(-2)
-    return `${d}/${m}/${y}`
-  }
-
   // Format slot time as "h:mm AM - h:mm PM (dd/mm/yy)" in local timezone
   const formatSlotTime = (slotStart: string | null, duration: number) => {
     if (!slotStart) return 'Deleted Slot'
     const start = new Date(slotStart)
     const end = new Date(start.getTime() + duration * 60000)
-    return `${formatTimeAMPM(start)} - ${formatTimeAMPM(end)} (${formatDateDMY(start)})`
+    const timeFormat = { hour: 'numeric', minute: '2-digit', hour12: true } as const
+    const startStr = start.toLocaleTimeString('en-US', timeFormat)
+    const endStr = end.toLocaleTimeString('en-US', timeFormat)
+    const dateStr = start.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    return `${startStr} - ${endStr} (${dateStr})`
   }
   
   // Format submit timestamp in local timezone with AM/PM
   const formatSubmitTime = (createdAt: string | null) => {
     if (!createdAt) return '-'
     const dt = new Date(createdAt)
-    return `${formatDateDMY(dt)}, ${formatTimeAMPM(dt)}`
+    const dateStr = dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    const timeStr = dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    return `${dateStr}, ${timeStr}`
   }
   
   return (
@@ -659,7 +656,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                       {isEditing('time') ? (
                         <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
                       ) : (
-                        <span className="px-2 py-1">{formatTimeAMPM(dt)}</span>
+                        <span className="px-2 py-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       )}
                     </td>
                     {/* Duration Cell */}
