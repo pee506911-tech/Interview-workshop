@@ -401,6 +401,16 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       return
     }
 
+    // Helper to format date as local ISO string (no timezone conversion)
+    const toLocalISOString = (dt: Date) => {
+      const y = dt.getFullYear()
+      const m = String(dt.getMonth() + 1).padStart(2, '0')
+      const d = String(dt.getDate()).padStart(2, '0')
+      const h = String(dt.getHours()).padStart(2, '0')
+      const min = String(dt.getMinutes()).padStart(2, '0')
+      return `${y}-${m}-${d}T${h}:${min}:00`
+    }
+
     let updateData: any = {}
     if (field === 'date') {
       // Keep the same time, just change the date (all in local timezone)
@@ -413,7 +423,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(y) || isNaN(m) || isNaN(d)) { setEditingCell(null); return }
       const newDt = new Date(y, m - 1, d, hours, minutes, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = newDt.toISOString()
+      updateData.startTime = toLocalISOString(newDt)
     } else if (field === 'time') {
       // Keep the same date, just change the time (all in local timezone)
       const oldDt = new Date(slot.startTime)
@@ -423,7 +433,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(h) || isNaN(min)) { setEditingCell(null); return }
       const newDt = new Date(oldDt.getFullYear(), oldDt.getMonth(), oldDt.getDate(), h, min, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = newDt.toISOString()
+      updateData.startTime = toLocalISOString(newDt)
     } else if (field === 'duration') {
       updateData.duration = parseInt(valueToUse) || slot.duration
     } else if (field === 'capacity') {
@@ -460,10 +470,10 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
     const row = newRows[idx]
     if (!row.subjectId || !row.date || !row.time) return
     
-    const dt = new Date(`${row.date}T${row.time}`)
+    // Send as local time string (no timezone conversion)
     await onAddRow?.({
       subjectId: row.subjectId,
-      startTime: dt.toISOString(),
+      startTime: `${row.date}T${row.time}:00`,
       duration: row.duration,
       maxCapacity: row.capacity
     })
