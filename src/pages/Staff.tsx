@@ -788,23 +788,40 @@ function SubjectModal({ subject, onClose, onSave }: { subject: Subject | null; o
 }
 
 function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subject[]; onClose: () => void; onGenerate: (data: any) => void }) {
+  // Helper to get today's date in YYYY-MM-DD format (local timezone)
+  const getTodayDate = () => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+  
   const [form, setForm] = useState({ 
     subjectId: subjects[0]?.id || '', 
     duration: 20, 
     capacity: 1, 
     breakTime: 0, 
     location: '', 
-    dates: [new Date().toISOString().split('T')[0]] as string[],
+    dates: [getTodayDate()] as string[],
     endDate: '', 
-    timeRanges: [{ startTime: '09:00', endTime: '17:00' }] as { startTime: string; endTime: string }[],
+    timeRanges: [{ startTime: '09:00 AM', endTime: '05:00 PM' }] as { startTime: string; endTime: string }[],
     days: [] as number[], 
     mode: 'dates' as 'dates' | 'recurring', 
     lunchBreak: false, 
-    lunchStart: '12:00', 
-    lunchEnd: '13:00' 
+    lunchStart: '12:00 PM', 
+    lunchEnd: '01:00 PM' 
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Convert 12h AM/PM format to 24h format (e.g., "09:00 AM" -> "09:00", "05:00 PM" -> "17:00")
+  const to24h = (time12h: string): string => {
+    const match = time12h.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+    if (!match) return time12h // Return as-is if not matching
+    let [, h, m, period] = match
+    let hour = parseInt(h, 10)
+    if (period.toUpperCase() === 'PM' && hour !== 12) hour += 12
+    if (period.toUpperCase() === 'AM' && hour === 12) hour = 0
+    return `${String(hour).padStart(2, '0')}:${m}`
+  }
 
   const handleGenerate = async () => {
     setError('')
@@ -834,6 +851,12 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
       return
     }
 
+    // Convert time ranges from 12h to 24h format for backend
+    const timeRanges24h = form.timeRanges.map(tr => ({
+      startTime: to24h(tr.startTime),
+      endTime: to24h(tr.endTime)
+    }))
+
     setLoading(true)
     try {
       await onGenerate({
@@ -841,13 +864,13 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
         dates: form.mode === 'dates' ? form.dates : null,
         startDate: form.mode === 'recurring' ? form.dates[0] : null,
         endDate: form.mode === 'recurring' ? form.endDate : null,
-        timeRanges: form.timeRanges,
+        timeRanges: timeRanges24h,
         duration: form.duration,
         capacity: form.capacity,
         breakTime: form.breakTime,
         location: form.location,
         days: form.mode === 'recurring' ? form.days : null,
-        lunchBreak: form.lunchBreak ? { start: form.lunchStart, end: form.lunchEnd } : null
+        lunchBreak: form.lunchBreak ? { start: to24h(form.lunchStart), end: to24h(form.lunchEnd) } : null
       })
     } catch (e: any) {
       setError(e.message || 'Failed to generate slots')
@@ -861,7 +884,7 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
   const removeDate = (idx: number) => setForm({ ...form, dates: form.dates.filter((_, i) => i !== idx) })
   const updateDate = (idx: number, val: string) => setForm({ ...form, dates: form.dates.map((d, i) => i === idx ? val : d) })
 
-  const addTimeRange = () => setForm({ ...form, timeRanges: [...form.timeRanges, { startTime: '09:00', endTime: '17:00' }] })
+  const addTimeRange = () => setForm({ ...form, timeRanges: [...form.timeRanges, { startTime: '09:00 AM', endTime: '05:00 PM' }] })
   const removeTimeRange = (idx: number) => setForm({ ...form, timeRanges: form.timeRanges.filter((_, i) => i !== idx) })
   const updateTimeRange = (idx: number, field: 'startTime' | 'endTime', val: string) => setForm({ ...form, timeRanges: form.timeRanges.map((t, i) => i === idx ? { ...t, [field]: val } : t) })
 
@@ -927,15 +950,15 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
       {/* Time Ranges Section */}
       <div>
         <div className="flex justify-between items-center mb-2">
-          <label className="text-xs font-semibold text-gray-600">Time Ranges *</label>
+          <label className="text-xs font-semibold text-gray-600">Time Ranges * <span className="text-gray-400 font-normal">(e.g., 09:00 AM)</span></label>
           <button onClick={addTimeRange} className="text-xs text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1"><i className="fa-solid fa-plus"></i> Add Time Range</button>
         </div>
         <div className="space-y-2 max-h-32 overflow-y-auto">
           {form.timeRanges.map((tr, idx) => (
             <div key={idx} className="flex gap-2 items-center">
-              <input type="time" value={tr.startTime} onChange={e => updateTimeRange(idx, 'startTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              <input type="text" value={tr.startTime} onChange={e => updateTimeRange(idx, 'startTime', e.target.value)} placeholder="09:00 AM" className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
               <span className="text-gray-400">to</span>
-              <input type="time" value={tr.endTime} onChange={e => updateTimeRange(idx, 'endTime', e.target.value)} className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
+              <input type="text" value={tr.endTime} onChange={e => updateTimeRange(idx, 'endTime', e.target.value)} placeholder="05:00 PM" className="flex-1 p-2 border rounded-lg bg-gray-50 text-sm" />
               {form.timeRanges.length > 1 && <button onClick={() => removeTimeRange(idx)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><i className="fa-solid fa-times"></i></button>}
             </div>
           ))}
@@ -944,7 +967,7 @@ function SlotGenerateModal({ subjects, onClose, onGenerate }: { subjects: Subjec
 
       <div className="border rounded-lg p-4 bg-gray-50">
         <div className="flex items-center gap-3 mb-3"><input type="checkbox" checked={form.lunchBreak} onChange={e => setForm({ ...form, lunchBreak: e.target.checked })} className="w-4 h-4 rounded" /><label className="font-medium text-sm cursor-pointer">Add Lunch Break</label></div>
-        {form.lunchBreak && <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-gray-500 mb-1">Break Start</label><input type="time" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} className="w-full p-2 border rounded-lg" /></div><div><label className="block text-xs text-gray-500 mb-1">Break End</label><input type="time" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} className="w-full p-2 border rounded-lg" /></div></div>}
+        {form.lunchBreak && <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs text-gray-500 mb-1">Break Start</label><input type="text" value={form.lunchStart} onChange={e => setForm({ ...form, lunchStart: e.target.value })} placeholder="12:00 PM" className="w-full p-2 border rounded-lg" /></div><div><label className="block text-xs text-gray-500 mb-1">Break End</label><input type="text" value={form.lunchEnd} onChange={e => setForm({ ...form, lunchEnd: e.target.value })} placeholder="01:00 PM" className="w-full p-2 border rounded-lg" /></div></div>}
       </div>
     </Modal>
   )

@@ -500,6 +500,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
 
     // POST /api/staff/slots/generate - Batch insert optimization
     // Supports: multiple dates OR recurring pattern, multiple time ranges
+    // NOTE: All times are treated as local time strings - no timezone conversion
     if (method === 'POST' && path === '/staff/slots/generate') {
       const req = await request.json() as any;
       const { subjectId, dates, startDate, endDate, timeRanges, startTime, endTime, duration, capacity, days, breakTime, location, lunchBreak } = req;
@@ -511,67 +512,115 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         ? timeRanges 
         : [{ startTime: startTime || '09:00', endTime: endTime || '17:00' }];
       
+      // Parse time string "HH:MM" to minutes since midnight
+      const parseTimeToMinutes = (timeStr: string): number => {
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+      };
+      
+      // Format minutes since midnight to "HH:MM:SS"
+      const minutesToTimeStr = (mins: number): string => {
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+      };
+      
       let lunchStartMin = 0, lunchEndMin = 0;
       if (lunchBreak?.start && lunchBreak?.end) {
-        const [lsh, lsm] = lunchBreak.start.split(':').map(Number);
-        const [leh, lem] = lunchBreak.end.split(':').map(Number);
-        lunchStartMin = lsh * 60 + lsm;
-        lunchEndMin = leh * 60 + lem;
+        lunchStartMin = parseTimeToMinutes(lunchBreak.start);
+        lunchEndMin = parseTimeToMinutes(lunchBreak.end);
       }
       
-      // Determine which dates to generate slots for
-      let targetDates: Date[] = [];
+      // Parse date string "YYYY-MM-DD" to components
+      const parseDateStr = (dateStr: string): { year: number; month: number; day: number } | null => {
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (!match) return null;
+        return { year: parseInt(match[1]), month: parseInt(match[2]), day: parseInt(match[3]) };
+      };
+      
+      // Get day of week for a date (0=Sunday, 6=Saturday)
+      const getDayOfWeek = (year: number, month: number, day: number): number => {
+        // Zeller's formula for Gregorian calendar
+        if (month < 3) { month += 12; year--; }
+        const q = day;
+        const m = month;
+        const k = year % 100;
+        const j = Math.floor(year / 100);
+        const h = (q + Math.floor((13 * (m + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7;
+        return ((h + 6) % 7); // Convert to 0=Sunday
+      };
+      
+      // Add days to a date
+      const addDays = (year: number, month: number, day: number, daysToAdd: number): { year: number; month: number; day: number } => {
+        const daysInMonth = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        // Leap year check
+        if ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) daysInMonth[2] = 29;
+        
+        day += daysToAdd;
+        while (day > daysInMonth[month]) {
+          day -= daysInMonth[month];
+          month++;
+          if (month > 12) { month = 1; year++; daysInMonth[2] = ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 29 : 28; }
+        }
+        return { year, month, day };
+      };
+      
+      // Compare two dates
+      const compareDates = (a: { year: number; month: number; day: number }, b: { year: number; month: number; day: number }): number => {
+        if (a.year !== b.year) return a.year - b.year;
+        if (a.month !== b.month) return a.month - b.month;
+        return a.day - b.day;
+      };
+      
+      // Collect target dates as strings "YYYY-MM-DD"
+      let targetDateStrs: string[] = [];
       
       if (dates && Array.isArray(dates) && dates.length > 0) {
         // Multiple specific dates mode
-        targetDates = dates.filter((d: string) => d).map((d: string) => {
-          const date = new Date(d);
-          date.setHours(0, 0, 0, 0);
-          return date;
-        });
+        targetDateStrs = dates.filter((d: string) => d && parseDateStr(d));
       } else if (startDate) {
-        // Recurring mode (or single date via old format)
-        let start = new Date(startDate);
-        let end = endDate ? new Date(endDate) : new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        end.setHours(0, 0, 0, 0);
+        // Recurring mode
+        const start = parseDateStr(startDate);
+        const end = endDate ? parseDateStr(endDate) : start;
+        if (!start || !end) return json({ error: 'Invalid date format' }, 400, corsOrigin);
         
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          if (days && days.length > 0 && !days.includes(d.getDay())) continue;
-          targetDates.push(new Date(d));
+        let current = { ...start };
+        while (compareDates(current, end) <= 0) {
+          const dow = getDayOfWeek(current.year, current.month, current.day);
+          if (!days || days.length === 0 || days.includes(dow)) {
+            targetDateStrs.push(`${current.year}-${String(current.month).padStart(2, '0')}-${String(current.day).padStart(2, '0')}`);
+          }
+          current = addDays(current.year, current.month, current.day, 1);
         }
       }
       
-      if (targetDates.length === 0) return json({ error: 'No valid dates provided' }, 400, corsOrigin);
+      if (targetDateStrs.length === 0) return json({ error: 'No valid dates provided' }, 400, corsOrigin);
       
       const slots: any[] = [];
       const slotInterval = duration + (breakTime || 0);
 
-      for (const targetDate of targetDates) {
+      for (const dateStr of targetDateStrs) {
         // Generate slots for each time range
         for (const range of ranges) {
-          const [sh, sm] = range.startTime.split(':').map(Number);
-          const [eh, em] = range.endTime.split(':').map(Number);
+          const startMin = parseTimeToMinutes(range.startTime);
+          const endMin = parseTimeToMinutes(range.endTime);
           
-          let curr = new Date(targetDate);
-          curr.setHours(sh, sm, 0, 0);
-          let endT = new Date(targetDate);
-          endT.setHours(eh, em, 0, 0);
+          let currMin = startMin;
           
-          while (curr < endT) {
-            const currMin = curr.getHours() * 60 + curr.getMinutes();
+          while (currMin + duration <= endMin) {
             const slotEndMin = currMin + duration;
             
+            // Skip lunch break
             if (lunchBreak && lunchStartMin && lunchEndMin && currMin < lunchEndMin && slotEndMin > lunchStartMin) {
-              curr.setHours(Math.floor(lunchEndMin / 60), lunchEndMin % 60, 0, 0);
+              currMin = lunchEndMin;
               continue;
             }
             
-            if (new Date(curr.getTime() + duration * 60000) <= endT) {
-              slots.push([uuid(), subjectId, new Date(curr).toISOString().slice(0, 19).replace('T', ' '), 
-                         duration, capacity, 0, sanitizeString(location || '')]);
-            }
-            curr.setMinutes(curr.getMinutes() + slotInterval);
+            // Create slot timestamp as "YYYY-MM-DD HH:MM:SS" (stored as-is, no timezone)
+            const slotTimestamp = `${dateStr} ${minutesToTimeStr(currMin)}`;
+            slots.push([uuid(), subjectId, slotTimestamp, duration, capacity, 0, sanitizeString(location || '')]);
+            
+            currMin += slotInterval;
           }
         }
       }
