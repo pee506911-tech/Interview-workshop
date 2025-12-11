@@ -111,8 +111,8 @@ export default function Staff() {
       <aside className="w-64 bg-white border-r flex flex-col flex-shrink-0">
         <div className="p-4 border-b">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">B</div>
-            <div><div className="font-bold leading-tight">Booking CMS</div><div className="text-xs text-green-600 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online</div></div>
+            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">W</div>
+            <div><div className="font-bold leading-tight">Interview Workshop</div><div className="text-xs text-green-600 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Online</div></div>
           </div>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -180,7 +180,7 @@ function LoginForm({ onLogin, toast, onCloseToast }: { onLogin: (u: string, p: s
       <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-sm">
         <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-xl flex items-center justify-center mb-6 text-2xl shadow-lg"><i className="fa-solid fa-shield-halved"></i></div>
         <h1 className="text-2xl font-bold mb-1">Staff Portal</h1>
-        <p className="text-sm text-gray-500 mb-6">Sign in to manage your booking system.</p>
+        <p className="text-sm text-gray-500 mb-6">Sign in to manage interview workshops.</p>
         <div className="space-y-4">
           <div><label className="block text-xs font-semibold text-gray-600 mb-1">Username</label><input value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" className="w-full p-3 bg-gray-50 border rounded-lg" /></div>
           <div><label className="block text-xs font-semibold text-gray-600 mb-1">Password</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleSubmit()} placeholder="Enter password" className="w-full p-3 bg-gray-50 border rounded-lg" /></div>
@@ -200,7 +200,7 @@ function LoginForm({ onLogin, toast, onCloseToast }: { onLogin: (u: string, p: s
 function Dashboard({ stats, bookings, onViewBooking }: { stats: any; bookings: Booking[]; onViewBooking: () => void }) {
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-8"><h1 className="text-2xl font-bold">Dashboard</h1><p className="text-gray-500">Overview of your booking system.</p></div>
+      <div className="mb-8"><h1 className="text-2xl font-bold">Dashboard</h1><p className="text-gray-500">Overview of interview workshop bookings.</p></div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Total Bookings" value={stats.totalBookings} icon="fa-calendar-check" color="blue" />
         <StatCard label="Today's Bookings" value={stats.todayBookings} icon="fa-calendar-day" color="green" />
@@ -763,7 +763,7 @@ function UsersTab({ users, onAdd, onEdit, onDelete }: { users: User[]; onAdd: ()
 function SettingsTab({ onClearBookings }: { onClearBookings: () => void }) {
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="mb-8"><h1 className="text-2xl font-bold">Settings</h1><p className="text-gray-500">Configure your booking system.</p></div>
+      <div className="mb-8"><h1 className="text-2xl font-bold">Settings</h1><p className="text-gray-500">Configure interview workshop settings.</p></div>
       <div className="bg-white rounded-xl border border-red-200 p-6">
         <h3 className="font-bold mb-4 text-red-600"><i className="fa-solid fa-triangle-exclamation mr-2"></i>Danger Zone</h3>
         <div className="flex justify-between items-center py-3">
