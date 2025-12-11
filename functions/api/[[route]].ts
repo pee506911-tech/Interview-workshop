@@ -250,16 +250,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         [subjectId]
       );
       const rows = Array.isArray(result) ? result : (result.rows || []);
-      // Helper to convert DB timestamp (stored as UTC) to ISO string
-      const toUTCISOString = (dbTime: any) => {
+      // Convert DB timestamp to local ISO string (no Z suffix = browser treats as local time)
+      const toLocalISOString = (dbTime: any) => {
         if (!dbTime) return null;
-        const timeStr = dbTime instanceof Date ? dbTime.toISOString() : String(dbTime);
-        if (timeStr.includes('T') && timeStr.endsWith('Z')) return timeStr;
-        if (timeStr.includes('T')) return timeStr + 'Z';
-        return timeStr.replace(' ', 'T') + 'Z';
+        const timeStr = dbTime instanceof Date ? dbTime.toISOString().replace('Z', '') : String(dbTime);
+        // Remove Z if present, format as YYYY-MM-DDTHH:MM:SS
+        const cleaned = timeStr.replace('Z', '').replace(' ', 'T');
+        return cleaned.includes('T') ? cleaned : cleaned.replace(' ', 'T');
       };
       return json(rows.map((r: any) => ({
-        id: r.id, subjectId: r.subject_id, startTime: toUTCISOString(r.start_time),
+        id: r.id, subjectId: r.subject_id, startTime: toLocalISOString(r.start_time),
         duration: r.duration, maxCapacity: r.max_capacity, currentBookings: r.current_bookings
       })), 200, corsOrigin);
     }
@@ -435,28 +435,22 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const subjectsResult = await db.execute('SELECT id, name, teacher, custom_fields, description, color, location, active FROM subjects ORDER BY name');
       const subjectsRows = Array.isArray(subjectsResult) ? subjectsResult : (subjectsResult.rows || []);
       
-      // Helper to convert DB timestamp (stored as UTC) to ISO string
-      const toUTCISOString = (dbTime: any) => {
+      // Convert DB timestamp to local ISO string (no Z suffix = browser treats as local time)
+      const toLocalISOString = (dbTime: any) => {
         if (!dbTime) return null;
-        // If it's already a string without Z, append Z to indicate UTC
-        const timeStr = dbTime instanceof Date ? dbTime.toISOString() : String(dbTime);
-        if (timeStr.includes('T') && !timeStr.endsWith('Z')) {
-          return timeStr + 'Z';
-        }
-        if (!timeStr.includes('T')) {
-          // Format: "2024-12-19 02:52:00" -> "2024-12-19T02:52:00Z"
-          return timeStr.replace(' ', 'T') + 'Z';
-        }
-        return timeStr;
+        const timeStr = dbTime instanceof Date ? dbTime.toISOString().replace('Z', '') : String(dbTime);
+        // Remove Z if present, format as YYYY-MM-DDTHH:MM:SS
+        const cleaned = timeStr.replace('Z', '').replace(' ', 'T');
+        return cleaned.includes('T') ? cleaned : cleaned.replace(' ', 'T');
       };
       
       return json({
         roster: bookingsRows.map((b: any) => ({
           id: b.id, studentName: b.student_name, studentId: b.student_id, studentEmail: b.student_email,
           subjectName: b.subject_name || 'Unknown', 
-          slotStart: toUTCISOString(b.start_time),
+          slotStart: toLocalISOString(b.start_time),
           slotDuration: b.duration || 0,
-          createdAt: toUTCISOString(b.created_at),
+          createdAt: toLocalISOString(b.created_at),
           status: b.status, answers: b.custom_answers
         })),
         subjects: subjectsRows.map((s: any) => {
@@ -490,10 +484,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!validateString(subjectId, 1, 36)) return json({ error: 'Invalid subject ID' }, 400, corsOrigin);
       if (!startTime) return json({ error: 'Start time required' }, 400, corsOrigin);
       
+      // Parse ISO string without timezone conversion - just extract the datetime part
+      const dtMatch = startTime.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}|\d{2}:\d{2})/);
+      if (!dtMatch) return json({ error: 'Invalid start time format' }, 400, corsOrigin);
+      const timepart = dtMatch[2].length === 5 ? dtMatch[2] + ':00' : dtMatch[2];
+      const dbTimestamp = `${dtMatch[1]} ${timepart}`;
+      
       const slotId = uuid();
       await db.execute(
         'INSERT INTO slots (id, subject_id, start_time, duration, max_capacity, current_bookings, location) VALUES (?, ?, ?, ?, ?, 0, ?)',
-        [slotId, subjectId, new Date(startTime).toISOString().slice(0, 19).replace('T', ' '), duration || 20, maxCapacity || 1, sanitizeString(location || '')]
+        [slotId, subjectId, dbTimestamp, duration || 20, maxCapacity || 1, sanitizeString(location || '')]
       );
       return json({ success: true, id: slotId }, 200, corsOrigin);
     }
@@ -711,21 +711,18 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const result = await db.execute(query, params);
       const rows = Array.isArray(result) ? result : (result.rows || []);
       
-      // Helper to convert DB timestamp (stored as UTC) to ISO string
-      const toUTCISOString = (dbTime: any) => {
+      // Convert DB timestamp to local ISO string (no Z suffix = browser treats as local time)
+      const toLocalISOString = (dbTime: any) => {
         if (!dbTime) return null;
-        const timeStr = dbTime instanceof Date ? dbTime.toISOString() : String(dbTime);
-        // If already has T and Z, return as-is
-        if (timeStr.includes('T') && timeStr.endsWith('Z')) return timeStr;
-        // If has T but no Z, append Z
-        if (timeStr.includes('T')) return timeStr + 'Z';
-        // Format: "2024-12-19 02:52:00" -> "2024-12-19T02:52:00Z"
-        return timeStr.replace(' ', 'T') + 'Z';
+        const timeStr = dbTime instanceof Date ? dbTime.toISOString().replace('Z', '') : String(dbTime);
+        // Remove Z if present, format as YYYY-MM-DDTHH:MM:SS
+        const cleaned = timeStr.replace('Z', '').replace(' ', 'T');
+        return cleaned.includes('T') ? cleaned : cleaned.replace(' ', 'T');
       };
       
       return json(rows.map((r: any) => ({
         id: r.id, subjectId: r.subject_id, subjectName: r.subject_name, teacher: r.teacher,
-        startTime: toUTCISOString(r.start_time), duration: r.duration,
+        startTime: toLocalISOString(r.start_time), duration: r.duration,
         maxCapacity: r.max_capacity, currentBookings: r.current_bookings, location: r.location || ''
       })), 200, corsOrigin);
     }
@@ -749,7 +746,15 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       const params: any[] = [];
       
       if (maxCapacity !== undefined) { updates.push('max_capacity = ?'); params.push(maxCapacity); }
-      if (startTime) { updates.push('start_time = ?'); params.push(new Date(startTime).toISOString().slice(0, 19).replace('T', ' ')); }
+      if (startTime) { 
+        // Parse ISO string without timezone conversion - just extract the datetime part
+        const dtMatch = startTime.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2}|\d{2}:\d{2})/);
+        if (dtMatch) {
+          const timepart = dtMatch[2].length === 5 ? dtMatch[2] + ':00' : dtMatch[2];
+          updates.push('start_time = ?'); 
+          params.push(`${dtMatch[1]} ${timepart}`);
+        }
+      }
       if (duration !== undefined) { updates.push('duration = ?'); params.push(duration); }
       if (location !== undefined) { updates.push('location = ?'); params.push(sanitizeString(location)); }
       if (subjectId !== undefined) { updates.push('subject_id = ?'); params.push(subjectId); }

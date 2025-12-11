@@ -401,6 +401,17 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       return
     }
 
+    // Helper to format Date as local ISO string (YYYY-MM-DDTHH:MM:SS without Z)
+    const toLocalISO = (dt: Date): string => {
+      const y = dt.getFullYear()
+      const m = String(dt.getMonth() + 1).padStart(2, '0')
+      const d = String(dt.getDate()).padStart(2, '0')
+      const h = String(dt.getHours()).padStart(2, '0')
+      const min = String(dt.getMinutes()).padStart(2, '0')
+      const s = String(dt.getSeconds()).padStart(2, '0')
+      return `${y}-${m}-${d}T${h}:${min}:${s}`
+    }
+
     let updateData: any = {}
     if (field === 'date') {
       // Keep the same time, just change the date (all in local timezone)
@@ -413,7 +424,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(y) || isNaN(m) || isNaN(d)) { setEditingCell(null); return }
       const newDt = new Date(y, m - 1, d, hours, minutes, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = newDt.toISOString()
+      updateData.startTime = toLocalISO(newDt)
     } else if (field === 'time') {
       // Keep the same date, just change the time (all in local timezone)
       const oldDt = new Date(slot.startTime)
@@ -423,7 +434,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
       if (isNaN(h) || isNaN(min)) { setEditingCell(null); return }
       const newDt = new Date(oldDt.getFullYear(), oldDt.getMonth(), oldDt.getDate(), h, min, 0, 0)
       if (isNaN(newDt.getTime())) { setEditingCell(null); return }
-      updateData.startTime = newDt.toISOString()
+      updateData.startTime = toLocalISO(newDt)
     } else if (field === 'duration') {
       updateData.duration = parseInt(valueToUse) || slot.duration
     } else if (field === 'capacity') {
@@ -442,10 +453,13 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
   const addNewRow = () => {
     const tomorrow = new Date()
     tomorrow.setDate(tomorrow.getDate() + 1)
+    const y = tomorrow.getFullYear()
+    const m = String(tomorrow.getMonth() + 1).padStart(2, '0')
+    const d = String(tomorrow.getDate()).padStart(2, '0')
     setNewRows([...newRows, {
       id: `new-${Date.now()}`,
       subjectId: subjects[0]?.id || '',
-      date: tomorrow.toISOString().split('T')[0],
+      date: `${y}-${m}-${d}`,
       time: '09:00',
       duration: 20,
       capacity: 1
@@ -460,10 +474,11 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
     const row = newRows[idx]
     if (!row.subjectId || !row.date || !row.time) return
     
-    const dt = new Date(`${row.date}T${row.time}`)
+    // Send as local ISO string (YYYY-MM-DDTHH:MM:SS without Z)
+    const timeWithSeconds = row.time.length === 5 ? row.time + ':00' : row.time
     await onAddRow?.({
       subjectId: row.subjectId,
-      startTime: dt.toISOString(),
+      startTime: `${row.date}T${timeWithSeconds}`,
       duration: row.duration,
       maxCapacity: row.capacity
     })
