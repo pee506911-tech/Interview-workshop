@@ -9,10 +9,11 @@ export function formatTimeRange(slot: Slot): string {
 
     const options: Intl.DateTimeFormatOptions = {
         hour: 'numeric',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: true
     }
 
-    return `${start.toLocaleTimeString([], options)} - ${end.toLocaleTimeString([], options)}`
+    return `${start.toLocaleTimeString('en-US', options)} - ${end.toLocaleTimeString('en-US', options)}`
 }
 
 /**

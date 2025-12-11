@@ -656,7 +656,7 @@ function SlotsTab({ slots, subjects, filter, onFilterChange, onGenerate, onDelet
                       {isEditing('time') ? (
                         <input type="time" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={e => saveEdit(e.target.value)} onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' && cancelEdit()} autoFocus className="w-full p-1 border-2 border-indigo-500 rounded text-sm" />
                       ) : (
-                        <span className="px-2 py-1">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="px-2 py-1">{dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
                       )}
                     </td>
                     {/* Duration Cell */}
