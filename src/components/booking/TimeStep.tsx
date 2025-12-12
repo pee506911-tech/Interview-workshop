@@ -138,15 +138,19 @@ export function TimeStep({
                 )}
             </div>
 
-            {/* Spacer when button is fixed */}
+            {/* Spacer for sticky button */}
             {selectedSlot && <div className="h-24" />}
 
-            {/* Fixed bottom button when slot is selected */}
+            {/* Sticky Confirm Button - appears when slot is selected */}
             {selectedSlot && (
                 <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-50 fade-in">
-                    <div className="max-w-xl mx-auto">
+                    <div className="max-w-lg mx-auto">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs text-gray-500">Selected time:</div>
+                            <div className="text-sm font-bold text-gray-900">{formatTimeRange(selectedSlot)}</div>
+                        </div>
                         <Button onClick={onContinue} isLoading={isValidating}>
-                            {isValidating ? 'Checking availability...' : 'Continue'}
+                            {isValidating ? 'Checking availability...' : 'Continue to Details'}
                         </Button>
                     </div>
                 </div>
