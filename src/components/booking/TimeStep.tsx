@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import type { Subject, Slot } from '../../types'
 import { BackButton, Button } from '../ui'
 import { formatTimeRange, formatDateParts } from '../../utils/formatters'
@@ -33,6 +34,20 @@ export function TimeStep({
     onContinue,
     onBack,
 }: TimeStepProps) {
+    const continueButtonRef = useRef<HTMLDivElement>(null)
+
+    // Auto-scroll to continue button when a slot is selected
+    useEffect(() => {
+        if (selectedSlot && continueButtonRef.current) {
+            // Small delay to ensure the button is rendered
+            setTimeout(() => {
+                continueButtonRef.current?.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                })
+            }, 100)
+        }
+    }, [selectedSlot])
     return (
         <section className="fade-in">
             <BackButton label="Back to Subjects" onClick={onBack} />
@@ -138,21 +153,11 @@ export function TimeStep({
                 )}
             </div>
 
-            {/* Spacer for sticky button */}
-            {selectedSlot && <div className="h-24" />}
-
-            {/* Sticky Confirm Button - appears when slot is selected */}
             {selectedSlot && (
-                <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-50 fade-in">
-                    <div className="max-w-lg mx-auto">
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="text-xs text-gray-500">Selected time:</div>
-                            <div className="text-sm font-bold text-gray-900">{formatTimeRange(selectedSlot)}</div>
-                        </div>
-                        <Button onClick={onContinue} isLoading={isValidating}>
-                            {isValidating ? 'Checking availability...' : 'Continue to Details'}
-                        </Button>
-                    </div>
+                <div ref={continueButtonRef} className="mt-6 fade-in">
+                    <Button onClick={onContinue} isLoading={isValidating}>
+                        {isValidating ? 'Checking availability...' : 'Continue'}
+                    </Button>
                 </div>
             )}
         </section>
