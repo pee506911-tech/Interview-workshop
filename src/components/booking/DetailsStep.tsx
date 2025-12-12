@@ -69,21 +69,20 @@ export function DetailsStep({
                     placeholder="Enter your full name"
                 />
 
-                <div className="grid grid-cols-2 gap-4">
-                    <Input
-                        label="Student ID"
-                        value={form.studentId}
-                        onChange={e => onFormChange({ studentId: e.target.value })}
-                        placeholder="e.g. 12345"
-                    />
-                    <Input
-                        label="Email"
-                        type="email"
-                        value={form.email}
-                        onChange={e => onFormChange({ email: e.target.value })}
-                        placeholder="your@email.com"
-                    />
-                </div>
+                <Input
+                    label="Wcode"
+                    sublabel="If you are not a student at Warwick Institute, leave it empty"
+                    value={form.studentId}
+                    onChange={e => onFormChange({ studentId: e.target.value })}
+                    placeholder="e.g. W12345"
+                />
+                <Input
+                    label="Email"
+                    type="email"
+                    value={form.email}
+                    onChange={e => onFormChange({ email: e.target.value })}
+                    placeholder="your@email.com"
+                />
 
                 {subject.customFields?.map(field => (
                     <Input
