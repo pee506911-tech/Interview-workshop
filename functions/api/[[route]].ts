@@ -275,15 +275,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       if (!validateString(data.studentName, 2, 255)) {
         return json({ error: 'Student name must be 2-255 characters' }, 400, corsOrigin);
       }
-      if (!validateString(data.studentId, 1, 100)) {
-        return json({ error: 'Invalid student ID' }, 400, corsOrigin);
+      // studentId (Wcode) is optional - accept empty or "-"
+      if (data.studentId && data.studentId !== '-' && !validateString(data.studentId, 1, 100)) {
+        return json({ error: 'Invalid Wcode' }, 400, corsOrigin);
       }
       if (!validateEmail(data.studentEmail)) {
         return json({ error: 'Invalid email address' }, 400, corsOrigin);
       }
       
       const studentName = sanitizeString(data.studentName);
-      const studentId = sanitizeString(data.studentId);
+      const studentId = data.studentId ? sanitizeString(data.studentId) : '-';
       const studentEmail = sanitizeString(data.studentEmail);
       
       // Check duplicate booking

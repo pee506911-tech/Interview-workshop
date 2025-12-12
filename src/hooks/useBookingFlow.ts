@@ -280,8 +280,8 @@ export function useBookingFlow(): UseBookingFlowReturn {
      * This is the second layer of race condition protection
      */
     const submitBooking = useCallback(async () => {
-        // Form validation
-        if (!form.name || !form.studentId || !form.email) {
+        // Form validation (studentId/Wcode is optional)
+        if (!form.name || !form.email) {
             showToast(ERROR_MESSAGES.FORM_INCOMPLETE, 'error')
             return
         }
@@ -310,12 +310,12 @@ export function useBookingFlow(): UseBookingFlowReturn {
                 return
             }
 
-            // Proceed with booking
+            // Proceed with booking (use "-" if Wcode is empty)
             await BookingService.createBooking({
                 slotId: selection.slot.id,
                 subjectId: selection.subject.id,
                 studentName: form.name,
-                studentId: form.studentId,
+                studentId: form.studentId.trim() || '-',
                 studentEmail: form.email,
                 customAnswers: form.customAnswers,
             })
